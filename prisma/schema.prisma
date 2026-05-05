@@ -1,0 +1,103 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model LogFile {
+  id           String              @id @default(cuid())
+  filename     String
+  originalName String
+  fileType     String              // 'auth', 'syslog', 'web_access', 'web_error'
+  fileSize     Int
+  content      String              @db.Text // Original log content
+  logSource    String              @default("upload") // upload, collector
+  status       String              @default("pending") // pending, processing, completed, error
+  pipelineMetadata String?         @db.Text // JSON string containing hybrid analysis metadata
+  lastAnalyzedAt DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  activities   SuspiciousActivity[]
+  parsedEntries ParsedLogEntry[]
+
+  @@index([logSource])
+}
+
+model SuspiciousActivity {
+  id           String    @id @default(cuid())
+  logFileId    String
+  logFile      LogFile   @relation(fields: [logFileId], references: [id], onDelete: Cascade)
+  activityType String    // 'failed_login', 'privilege_escalation', 'brute_force', 'unauthorized_access', 'anomaly', 'suspicious_ip'
+  severity     String    // 'low', 'medium', 'high', 'critical'
+  timestamp    String    // Timestamp from the log entry
+  sourceIp     String?
+  username     String?
+  description  String
+  rawLog       String    @db.Text // Original log line
+  metadata     String?   @db.Text // JSON string for additional data
+  createdAt    DateTime  @default(now())
+
+  @@index([logFileId])
+  @@index([activityType])
+  @@index([severity])
+}
+
+model ParsedLogEntry {
+  id             String   @id @default(cuid())
+  logFileId      String
+  logFile        LogFile  @relation(fields: [logFileId], references: [id], onDelete: Cascade)
+  lineNumber     Int
+  timestamp      String?
+  source         String?
+  rawLine        String   @db.Text
+  normalizedText String   @db.Text
+  tokens         String?  @db.Text // JSON array string
+  templateId     String?
+  templateText   String?  @db.Text
+  anomalyScore   Float?
+  anomalyFlag    Boolean  @default(false)
+  detector       String?  // isolation_forest or null
+  metadata       String?  @db.Text // JSON string for extra per-line data
+  createdAt      DateTime @default(now())
+
+  @@index([logFileId])
+  @@index([templateId])
+  @@index([anomalyFlag])
+}
+
+model EvaluationRun {
+  id           String   @id @default(cuid())
+  datasetDir   String
+  sampleCount  Int
+  summary      String   @db.Text // JSON string containing unlabeled metrics
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model CollectorState {
+  id             String   @id // use "default" as singleton id
+  status         String   @default("idle") // idle, running, completed, error
+  lastRunAt      DateTime?
+  filesScanned   Int      @default(0)
+  linesIngested  Int      @default(0)
+  logFilesCreated Int     @default(0)
+  lastError      String?  @db.Text
+  updatedAt      DateTime @updatedAt
+}
+
+model CollectorOffset {
+  id         String   @id @default(cuid())
+  filePath   String   @unique
+  offset     Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@index([updatedAt])
+}

@@ -1,0 +1,64 @@
+
+---PAGE 1---
+DEVELOPMENT OF A LOG ANALYSIS SYSTEM FOR 
+DETECTING SUSPICIOUS ACTIVITIES FROM LINUX 
+SERVERS AND WEB BASED LOGS
+by
+AKA-BABATUNDE ABDULBASIT AYOBAMIDELE
+22/SCI01/025
+SUPERVISOR: DR. AWOYEMI OLORUNTOBA
+PROPOSAL PRESENTATION
+ON
+
+---PAGE 2---
+AIM AND OBJECTIVES
+Aim
+Development of a log analysis System for detecting suspicious activities from linux servers and web 
+based logs
+The objectives are to:
+i. develop a system that collects, preprocesses, and parses log data automatically.
+ii. implement Drain3 log parsing for real-time generation of structured log
+templates.
+iii. design a rule-based system to detect known suspicious activities, like failed logins and 
+unauthorized access, alongside an Isolation Forest model to flag unknown anomalies.
+
+---PAGE 3---
+SCOPE OF THE STUDY
+➢ System Scope: Focused on analyzing Linux server logs (auth logs, syslogs) and web server logs 
+(Apache/Nginx access and error logs) for suspicious activities.
+➢ Data Scope: Uses real log files collected from Linux-based environments. Log formats covered include: 
+/var/log/auth.log, /var/log/syslog, and standard web server log formats.
+➢  Conceptual Scope: Centers on identifying suspicious activities such as failed logins, privilege escalation 
+attempts, repeated errors, unusual traffic patterns, and other anomaly indicators.
+➢ Methodological Scope: Implements a lightweight pipeline combining log parsing(using drain3), rule-
+based rules(rule-based detection), and machine-learning-based anomaly detection(using isolation 
+forest model). Evaluation will be performed using 300–500 log samples.
+
+---PAGE 4---
+PROPOSED METHODOLOGY
+❖Log Collection
+This is the stage where the real server logs such as Linux authentication logs, syslogs, 
+and web server logs, and store all the collected logs in a well-structured directory to make 
+proper analysis easier and more organized.
+❖Preprocessing
+Preprocessing would involve the cleaning of the logs and preparing them for parsing by removing 
+the dynamic parts(logs that keep changing no specific value), normalizing the text, standardizing 
+the timestamp formats, and performing tokenization to ensure the data is consistent and ready 
+for further analysis.
+
+---PAGE 5---
+METHODOLOGY CONT’D
+❖Log Parsing using Drain3
+This step involves using the Drain3 algorithm to parse the logs by converting them into templates, grouping 
+similar log messages into meaningful patterns, and producing structured logs that are stored as JSON to make 
+further analysis easier and more organized.
+❖Detection Algorithms
+The step covers the detection algorithms, starting with rule-based detection, where you create simple rules 
+to catch suspicious activities such as more than five failed logins in one minute, users trying to access root 
+privileges, or multiple repeated errors coming from the same IP address. 
+It also includes using an Isolation Forest model, which is trained on normal logs to identify unusual behavior 
+by isolating outliers and generating an anomaly score for each log entry.
+
+---PAGE 6---
+Figure 1: Diagram of The Proposed System Architecture 
+PROPOSED SYSTEM ARCHITECTURE 
