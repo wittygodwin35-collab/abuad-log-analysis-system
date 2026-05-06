@@ -1,8 +1,9 @@
 "use client";
 
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Shield, LogIn } from "lucide-react";
+import { KeyRound, LogIn, Shield, UserPlus } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,6 +100,20 @@ function LoginForm() {
               <LogIn className={`h-4 w-4 mr-2 ${isSubmitting ? "animate-pulse" : ""}`} />
               {isSubmitting ? "Signing In..." : "Sign In"}
             </Button>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button asChild variant="outline" type="button" className="w-full">
+                <Link href="/signup">
+                  <UserPlus className="h-4 w-4" />
+                  Request access
+                </Link>
+              </Button>
+              <Button asChild variant="ghost" type="button" className="w-full">
+                <Link href="/forgot-password">
+                  <KeyRound className="h-4 w-4" />
+                  Forgot password
+                </Link>
+              </Button>
+            </div>
           </form>
         </CardContent>
       </Card>

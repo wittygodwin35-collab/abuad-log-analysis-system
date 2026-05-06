@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionCookieName, verifySessionToken } from "@/lib/auth";
 
+const PUBLIC_AUTH_PAGES = new Set(["/login", "/signup", "/forgot-password"]);
+
 function isPublicPath(pathname: string): boolean {
   return (
-    pathname === "/login" ||
+    PUBLIC_AUTH_PAGES.has(pathname) ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
@@ -15,7 +17,7 @@ export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   if (isPublicPath(pathname)) {
-    if (pathname === "/login") {
+    if (PUBLIC_AUTH_PAGES.has(pathname)) {
       const token = request.cookies.get(getSessionCookieName())?.value;
       const user = await verifySessionToken(token);
       if (user) {
