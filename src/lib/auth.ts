@@ -56,10 +56,10 @@ async function importSigningKey(secret: string): Promise<CryptoKey> {
   );
 }
 
-function getRequiredEnv(name: string): string {
-  const value = process.env[name]?.trim();
+function getRequiredEnv(names: string[]): string {
+  const value = names.map((name) => process.env[name]?.trim()).find(Boolean);
   if (!value) {
-    throw new Error(`${name} is not configured.`);
+    throw new Error(`${names.join(" or ")} is not configured.`);
   }
 
   return value;
@@ -90,7 +90,7 @@ export function isValidCredentialAttempt(username: string, password: string): bo
 }
 
 export function getAuthSecret(): string {
-  return getRequiredEnv("AUTH_SECRET");
+  return getRequiredEnv(["AUTH_SECRET", "NEXTAUTH_SECRET"]);
 }
 
 export function getSessionCookieName(): string {

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
 import { getConfiguredCredentials } from "@/lib/auth";
+import { buildRequestReference, savePasswordResetRequest } from "@/lib/request-storage";
 
 export const runtime = "nodejs";
 
@@ -17,13 +17,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const parsed = passwordResetRequestSchema.parse(body);
 
-    const resetRequest = await db.passwordResetRequest.create({
-      data: {
-        fullName: parsed.fullName || null,
-        email: parsed.email,
-        username: parsed.username,
-        note: parsed.note || null,
-      },
+    const resetRequest = await savePasswordResetRequest({
+      fullName: parsed.fullName || null,
+      email: parsed.email,
+      username: parsed.username,
+      note: parsed.note || null,
     });
 
     const configured = getConfiguredCredentials();
@@ -31,7 +29,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       requestId: resetRequest.id,
-      reference: `PR-${resetRequest.id.slice(-6).toUpperCase()}`,
+      reference: buildRequestReference("PR", resetRequest.id),
       sharedCredentials: configured,
     });
   } catch (error) {

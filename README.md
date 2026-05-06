@@ -75,7 +75,7 @@ If you are not using Supabase, any reachable PostgreSQL instance will work as lo
 
 Authentication is configured with environment variables:
 
-- `AUTH_SECRET`: signing secret for the app session cookie.
+- `AUTH_SECRET`: signing secret for the app session cookie. `NEXTAUTH_SECRET` is also accepted as an alias.
 - `APP_USERNAME`: dashboard username.
 - `APP_PASSWORD`: dashboard password.
 
@@ -174,6 +174,7 @@ Recommended deployment flow:
    - `DATABASE_URL`
    - `DIRECT_URL`
    - `AUTH_SECRET`
+   - `NEXTAUTH_SECRET` if you use that name instead of `AUTH_SECRET`
    - `APP_USERNAME`
    - `APP_PASSWORD`
    - `ML_SERVICE_MODE`
@@ -182,6 +183,8 @@ Recommended deployment flow:
 4. Keep `NORMAL_LOG_DIR="examples/normal-training-dataset"` and `EVALUATION_DATASET_DIR="examples/evaluation-dataset"` if you want the bundled datasets.
 5. Leave `ML_SERVICE_MODE="internal"` to host the ML path on Netlify. Only add `ML_SERVICE_URL` if you are deliberately routing to the optional external Python service.
 6. Trigger a deploy.
+
+The public access request and password recovery forms prefer PostgreSQL when `DATABASE_URL` is configured. On Netlify, they fall back to site-scoped Netlify Blobs so those requests can still be captured before a database is connected.
 
 If you use the Netlify CLI, import environment variables before deploying:
 

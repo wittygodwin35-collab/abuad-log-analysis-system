@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { buildRequestReference, saveAccessRequest } from "@/lib/request-storage";
 
 export const runtime = "nodejs";
 
@@ -16,19 +16,17 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const parsed = accessRequestSchema.parse(body);
 
-    const accessRequest = await db.accessRequest.create({
-      data: {
-        fullName: parsed.fullName,
-        email: parsed.email,
-        department: parsed.department || null,
-        useCase: parsed.useCase,
-      },
+    const accessRequest = await saveAccessRequest({
+      fullName: parsed.fullName,
+      email: parsed.email,
+      department: parsed.department || null,
+      useCase: parsed.useCase,
     });
 
     return NextResponse.json({
       success: true,
       requestId: accessRequest.id,
-      reference: `AR-${accessRequest.id.slice(-6).toUpperCase()}`,
+      reference: buildRequestReference("AR", accessRequest.id),
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
