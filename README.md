@@ -10,6 +10,7 @@ This project is a revised implementation of the "Development of a Log Analysis S
 - PostgreSQL-backed history for log files, detections, parsed entries, collector offsets, and evaluation runs.
 - Dashboard summaries for critical, high, medium, and low risk findings.
 - Evaluation support for rule-hit counts and chapter-three confusion-matrix metrics.
+- Netlify-hosted internal ML mode with state persisted across deploys via Netlify Blobs.
 
 ## Architecture
 
@@ -25,7 +26,8 @@ The system is split into the three layers described in chapter three:
    - Hybrid orchestration: `src/lib/hybrid-analysis.ts`
    - Privacy sanitizer: `src/lib/privacy.ts`
    - ML client: `src/lib/ml-service.ts`
-   - Python service: `mini-services/ml-analyzer`
+   - Internal Netlify-compatible ML engine: `src/lib/ml-engine.ts`
+   - Optional Python companion service: `mini-services/ml-analyzer`
 
 3. Presentation layer
    - Dashboard: `src/app/page.tsx`
@@ -77,16 +79,6 @@ Authentication is configured with environment variables:
 - `APP_USERNAME`: dashboard username.
 - `APP_PASSWORD`: dashboard password.
 
-Start the Python ML service:
-
-```bash
-cd mini-services/ml-analyzer
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python -m uvicorn app:app --host 127.0.0.1 --port 8001
-```
-
 Start the Next.js app:
 
 ```bash
@@ -96,6 +88,18 @@ npm run dev:local
 Open `http://localhost:3000`.
 
 Sign in with the credentials from `.env`.
+
+The app now runs its ML analysis internally by default, including on Netlify. The Python mini-service is optional and only needed when you explicitly set `ML_SERVICE_MODE=external`.
+
+Optional external Python service:
+
+```bash
+cd mini-services/ml-analyzer
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m uvicorn app:app --host 127.0.0.1 --port 8001
+```
 
 ## Using The App
 
@@ -115,13 +119,11 @@ The dashboard also supports:
 
 ## ML Service Notes
 
-Normal analysis still works when the Python ML service is offline. In that case the app falls back to rule-based detection and stores the fallback status in pipeline metadata.
+The default `ML_SERVICE_MODE=internal` path runs the anomaly model inside the Next.js app, so uploaded log analysis, model training, and evaluation all work inside a single Netlify deployment.
 
-Model training and evaluation are different:
+When deployed on Netlify, trained model state is stored in Netlify Blobs so it survives new function instances and new deploys. During local development, the same state falls back to `mini-services/ml-analyzer/state/ml-model-state.json`.
 
-- `POST /api/model/train` requires a reachable `ML_SERVICE_URL`.
-- `POST /api/evaluation/run` requires a reachable `ML_SERVICE_URL`.
-- Both routes now accept bundled dataset defaults, so they fail with a clear ML-service error instead of a missing-directory error when the dataset path is valid but the Python service is unavailable.
+If you want to keep using the Python service instead, set `ML_SERVICE_MODE=external` and provide a reachable `ML_SERVICE_URL`.
 
 ## Evaluation
 
@@ -160,8 +162,9 @@ Before deploying, keep these platform constraints in mind:
 
 1. The Next.js app is a good fit for Netlify.
 2. The PostgreSQL database is a good fit for Netlify Functions when you keep using the pooled Supabase runtime URL.
-3. The Python ML service is not deployed by this Netlify app. Host `mini-services/ml-analyzer` separately and set `ML_SERVICE_URL` to that public service.
-4. The log collector is mainly useful on self-hosted Linux infrastructure where `/var/log/...` paths exist. On Netlify it will usually scan zero files unless you intentionally point it at another readable path source.
+3. The ML service can now stay inside this same Netlify deployment when you keep `ML_SERVICE_MODE=internal`. Netlify Functions handle the inference and Netlify Blobs persist the trained model state.
+4. The optional Python service remains available for self-hosted or compatibility scenarios when you explicitly switch to `ML_SERVICE_MODE=external`.
+5. The log collector is mainly useful on self-hosted Linux infrastructure where `/var/log/...` paths exist. On Netlify it will usually scan zero files unless you intentionally point it at another readable path source.
 
 Recommended deployment flow:
 
@@ -173,11 +176,12 @@ Recommended deployment flow:
    - `AUTH_SECRET`
    - `APP_USERNAME`
    - `APP_PASSWORD`
-   - `ML_SERVICE_URL`
+   - `ML_SERVICE_MODE`
    - `NORMAL_LOG_DIR`
    - `EVALUATION_DATASET_DIR`
 4. Keep `NORMAL_LOG_DIR="examples/normal-training-dataset"` and `EVALUATION_DATASET_DIR="examples/evaluation-dataset"` if you want the bundled datasets.
-5. Trigger a deploy.
+5. Leave `ML_SERVICE_MODE="internal"` to host the ML path on Netlify. Only add `ML_SERVICE_URL` if you are deliberately routing to the optional external Python service.
+6. Trigger a deploy.
 
 If you use the Netlify CLI, import environment variables before deploying:
 

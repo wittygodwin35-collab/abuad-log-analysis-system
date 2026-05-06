@@ -4,6 +4,13 @@ import type {
   ParsedEntry,
   TemplateSummary,
 } from '@/lib/pipeline-types';
+import {
+  analyzeWithInternalMl,
+  getInternalMlHealth,
+  MlInputError,
+  runInternalMlEvaluation,
+  trainInternalMlModel,
+} from '@/lib/ml-engine';
 
 export interface MlAnalyzeResponse {
   logType?: string | null;
@@ -36,6 +43,10 @@ type AvailabilityResponse<T> = {
 
 const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://127.0.0.1:8001';
 const REQUEST_TIMEOUT_MS = 20000;
+
+function shouldUseExternalMlService(): boolean {
+  return process.env.ML_SERVICE_MODE?.trim().toLowerCase() === 'external';
+}
 
 async function fetchMl<T>(
   path: string,
@@ -86,6 +97,21 @@ async function fetchMl<T>(
 }
 
 export async function checkMlHealth(): Promise<AvailabilityResponse<Record<string, unknown>>> {
+  if (!shouldUseExternalMlService()) {
+    try {
+      return {
+        available: true,
+        data: await getInternalMlHealth(),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown ML service error';
+      return {
+        available: false,
+        error: message,
+      };
+    }
+  }
+
   return fetchMl<Record<string, unknown>>('/health', {
     method: 'GET',
   });
@@ -97,6 +123,29 @@ export async function analyzeWithMl(payload: {
   source: string;
   logFileId?: string;
 }): Promise<AvailabilityResponse<MlAnalyzeResponse>> {
+  if (!shouldUseExternalMlService()) {
+    try {
+      return {
+        available: true,
+        data: await analyzeWithInternalMl(payload),
+      };
+    } catch (error) {
+      if (error instanceof MlInputError) {
+        return {
+          available: true,
+          error: error.message,
+          status: error.status,
+        };
+      }
+
+      const message = error instanceof Error ? error.message : 'Unknown ML service error';
+      return {
+        available: false,
+        error: message,
+      };
+    }
+  }
+
   return fetchMl<MlAnalyzeResponse>('/analyze', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -107,6 +156,32 @@ export async function trainMlModel(payload: {
   normalLogDir?: string;
   maxSamples?: number;
 }): Promise<AvailabilityResponse<MlTrainResponse>> {
+  if (!shouldUseExternalMlService()) {
+    try {
+      return {
+        available: true,
+        data: await trainInternalMlModel({
+          maxSamples: payload.maxSamples,
+          normalLogDir: payload.normalLogDir || '',
+        }),
+      };
+    } catch (error) {
+      if (error instanceof MlInputError) {
+        return {
+          available: true,
+          error: error.message,
+          status: error.status,
+        };
+      }
+
+      const message = error instanceof Error ? error.message : 'Unknown ML service error';
+      return {
+        available: false,
+        error: message,
+      };
+    }
+  }
+
   return fetchMl<MlTrainResponse>('/train', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -118,6 +193,29 @@ export async function runMlEvaluation(payload: {
   sampleMin?: number;
   sampleMax?: number;
 }): Promise<AvailabilityResponse<MlEvaluateResponse>> {
+  if (!shouldUseExternalMlService()) {
+    try {
+      return {
+        available: true,
+        data: await runInternalMlEvaluation(payload),
+      };
+    } catch (error) {
+      if (error instanceof MlInputError) {
+        return {
+          available: true,
+          error: error.message,
+          status: error.status,
+        };
+      }
+
+      const message = error instanceof Error ? error.message : 'Unknown ML service error';
+      return {
+        available: false,
+        error: message,
+      };
+    }
+  }
+
   return fetchMl<MlEvaluateResponse>('/evaluate', {
     method: 'POST',
     body: JSON.stringify(payload),

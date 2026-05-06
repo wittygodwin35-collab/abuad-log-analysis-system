@@ -58,3 +58,4 @@ server.log
 __pycache__/
 *.pyc
 .venv/
+mini-services/ml-analyzer/state/ml-model-state.json

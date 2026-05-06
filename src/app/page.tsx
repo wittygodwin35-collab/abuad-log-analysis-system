@@ -797,7 +797,7 @@ export default function LogAnalyzerPage() {
                   Collector paths are most useful on self-hosted Linux deployments where real server logs are readable.
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Model training and evaluation require a reachable ML service in <span className="font-mono">ML_SERVICE_URL</span>.
+                  Model training and evaluation run inside the app by default, including on Netlify. Set <span className="font-mono">ML_SERVICE_MODE=external</span> only if you want the optional Python service.
                 </p>
                 <div className="text-xs text-muted-foreground space-y-1 pt-3 border-t border-border/50 font-mono mt-2">
                   <div className="flex justify-between items-center">

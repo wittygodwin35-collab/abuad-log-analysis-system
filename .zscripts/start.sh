@@ -69,6 +69,7 @@ if [ -f "./next-service-dist/server.js" ]; then
     export NODE_ENV=production
     export PORT=${PORT:-3000}
     export HOSTNAME=${HOSTNAME:-0.0.0.0}
+    export ML_SERVICE_MODE=${ML_SERVICE_MODE:-internal}
     export ML_SERVICE_PORT=${ML_SERVICE_PORT:-8001}
     export ML_SERVICE_URL=${ML_SERVICE_URL:-http://127.0.0.1:$ML_SERVICE_PORT}
     
