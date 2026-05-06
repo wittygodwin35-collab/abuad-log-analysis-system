@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   createSessionToken,
-  getConfiguredCredentials,
   getSessionCookieName,
   getSessionCookieOptions,
+  isValidCredentialAttempt,
 } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -17,9 +17,8 @@ export async function POST(request: NextRequest) {
 
     const username = body.username?.trim() || "";
     const password = body.password || "";
-    const configured = getConfiguredCredentials();
 
-    if (username !== configured.username || password !== configured.password) {
+    if (!isValidCredentialAttempt(username, password)) {
       return NextResponse.json(
         { error: "Invalid username or password." },
         { status: 401 },

@@ -1,5 +1,7 @@
 const AUTH_COOKIE_NAME = "abuad_session";
 const SESSION_DURATION_SECONDS = 60 * 60 * 12;
+const DEFAULT_APP_USERNAME = "Aka-babatunde Abdulbasit Ayobamidele";
+const DEFAULT_APP_PASSWORD = "22/SCI01/025";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -63,11 +65,28 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
+function getEnvOrDefault(name: string, defaultValue: string): string {
+  return process.env[name]?.trim() || defaultValue;
+}
+
+function normalizeUsername(username: string): string {
+  return username.trim().toLowerCase();
+}
+
 export function getConfiguredCredentials(): { username: string; password: string } {
   return {
-    username: getRequiredEnv("APP_USERNAME"),
-    password: getRequiredEnv("APP_PASSWORD"),
+    username: getEnvOrDefault("APP_USERNAME", DEFAULT_APP_USERNAME),
+    password: getEnvOrDefault("APP_PASSWORD", DEFAULT_APP_PASSWORD),
   };
+}
+
+export function isValidCredentialAttempt(username: string, password: string): boolean {
+  const configured = getConfiguredCredentials();
+
+  return (
+    normalizeUsername(username) === normalizeUsername(configured.username) &&
+    password === configured.password
+  );
 }
 
 export function getAuthSecret(): string {
