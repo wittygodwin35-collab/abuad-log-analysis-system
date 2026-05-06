@@ -101,3 +101,34 @@ model CollectorOffset {
 
   @@index([updatedAt])
 }
+
+model AccessRequest {
+  id          String   @id @default(cuid())
+  fullName    String
+  email       String
+  department  String?
+  useCase     String   @db.Text
+  status      String   @default("pending") // pending, reviewed, approved, denied
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PasswordResetRequest {
+  id         String   @id @default(cuid())
+  fullName   String?
+  email      String
+  username   String
+  note       String?  @db.Text
+  status     String   @default("pending") // pending, reviewed, completed
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([email])
+  @@index([username])
+  @@index([status])
+  @@index([createdAt])
+}

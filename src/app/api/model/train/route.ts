@@ -69,8 +69,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result.data);
   } catch (error) {
     console.error('Error training model:', error);
+    const details = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Failed to train model' },
+      { error: 'Failed to train model', details },
       { status: 500 },
     );
   }

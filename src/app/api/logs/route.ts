@@ -22,8 +22,9 @@ export async function GET() {
     return NextResponse.json({ logFiles });
   } catch (error) {
     console.error('Error fetching log files:', error);
+    const details = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Failed to fetch log files' },
+      { error: 'Failed to fetch log files', details },
       { status: 500 }
     );
   }

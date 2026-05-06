@@ -7,6 +7,8 @@ function isPublicPath(pathname: string): boolean {
   return (
     PUBLIC_AUTH_PAGES.has(pathname) ||
     pathname.startsWith("/api/auth/") ||
+    pathname === "/api/access-requests" ||
+    pathname === "/api/password-reset-requests" ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
     pathname === "/robots.txt"

@@ -1,0 +1,18 @@
+Jan 15 09:00:01 abuad-web-01 sshd[14001]: Accepted password for analyst from 10.10.5.21 port 54121 ssh2
+Jan 15 09:01:17 abuad-web-01 sudo: analyst : TTY=pts/0 ; PWD=/home/analyst ; USER=root ; COMMAND=/usr/bin/systemctl status nginx
+Jan 15 09:03:02 abuad-web-01 sshd[14108]: Failed password for invalid user admin from 198.51.100.77 port 40211 ssh2
+Jan 15 09:03:05 abuad-web-01 sshd[14109]: Failed password for invalid user admin from 198.51.100.77 port 40214 ssh2
+Jan 15 09:03:08 abuad-web-01 sshd[14110]: Failed password for invalid user root from 198.51.100.77 port 40218 ssh2
+Jan 15 09:03:11 abuad-web-01 sshd[14111]: Failed password for invalid user oracle from 198.51.100.77 port 40220 ssh2
+Jan 15 09:03:14 abuad-web-01 sshd[14112]: Failed password for invalid user test from 198.51.100.77 port 40225 ssh2
+Jan 15 09:03:17 abuad-web-01 sshd[14113]: Failed password for invalid user postgres from 198.51.100.77 port 40229 ssh2
+198.51.100.77 - - [15/Jan/2025:09:04:01 +0000] "GET /.env HTTP/1.1" 404 128 "-" "Nikto/2.1.6"
+198.51.100.77 - - [15/Jan/2025:09:04:09 +0000] "GET /admin/login.php HTTP/1.1" 404 196 "-" "sqlmap/1.6.12"
+198.51.100.77 - - [15/Jan/2025:09:04:15 +0000] "GET /api/users?select=*%20FROM%20users-- HTTP/1.1" 400 64 "-" "Mozilla/5.0"
+198.51.100.77 - - [15/Jan/2025:09:04:22 +0000] "GET /../../../../etc/passwd HTTP/1.1" 403 512 "-" "Mozilla/5.0"
+203.0.113.42 - - [15/Jan/2025:09:05:01 +0000] "POST /wp-login.php HTTP/1.1" 401 739 "-" "Mozilla/5.0"
+203.0.113.42 - - [15/Jan/2025:09:05:03 +0000] "POST /wp-login.php HTTP/1.1" 401 742 "-" "Mozilla/5.0"
+203.0.113.42 - - [15/Jan/2025:09:05:05 +0000] "POST /wp-login.php HTTP/1.1" 401 744 "-" "Mozilla/5.0"
+Jan 15 09:06:31 abuad-web-01 sudo: unknown : 3 incorrect password attempts ; TTY=pts/3 ; PWD=/tmp ; USER=root ; COMMAND=/bin/bash
+Jan 15 09:07:10 abuad-web-01 kernel: [9412.104511] Out of memory: Killed process 5221 (python3) total-vm:912388kB
+10.10.5.23 - analyst [15/Jan/2025:09:08:14 +0000] "GET /dashboard HTTP/1.1" 200 1812 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"

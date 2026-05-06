@@ -121,8 +121,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error running evaluation:', error);
+    const details = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Failed to run evaluation' },
+      { error: 'Failed to run evaluation', details },
       { status: 500 },
     );
   }

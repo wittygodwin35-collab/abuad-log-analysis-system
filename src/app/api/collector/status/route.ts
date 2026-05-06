@@ -9,8 +9,9 @@ export async function GET() {
     return NextResponse.json(status);
   } catch (error) {
     console.error('Error fetching collector status:', error);
+    const details = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { error: 'Failed to fetch collector status' },
+      { error: 'Failed to fetch collector status', details },
       { status: 500 },
     );
   }
