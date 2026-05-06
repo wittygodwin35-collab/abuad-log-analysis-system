@@ -1,7 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { stat } from 'fs/promises';
+import {
+  DEFAULT_NORMAL_LOG_DIR,
+  ensureBundledDatasetDir,
+  isBundledDatasetPath,
+} from '@/lib/demo-data';
 import { trainMlModel } from '@/lib/ml-service';
 
 export const runtime = 'nodejs';
+
+async function directoryExists(path: string): Promise<boolean> {
+  const fileStat = await stat(path).catch(() => null);
+  return Boolean(fileStat?.isDirectory());
+}
+
+async function resolveNormalLogDir(normalLogDir?: string): Promise<string> {
+  const requested = normalLogDir?.trim();
+  const configured = process.env.NORMAL_LOG_DIR?.trim();
+  const candidate = requested || configured || DEFAULT_NORMAL_LOG_DIR;
+
+  if (isBundledDatasetPath(candidate, "normal")) {
+    return ensureBundledDatasetDir("normal");
+  }
+
+  if (await directoryExists(candidate)) {
+    return candidate;
+  }
+
+  if (!requested) {
+    return ensureBundledDatasetDir("normal");
+  }
+
+  return candidate;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,7 +42,7 @@ export async function POST(request: NextRequest) {
     };
 
     const result = await trainMlModel({
-      normalLogDir: body.normalLogDir || process.env.NORMAL_LOG_DIR,
+      normalLogDir: await resolveNormalLogDir(body.normalLogDir),
       maxSamples: body.maxSamples,
     });
 

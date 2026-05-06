@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { stat } from 'fs/promises';
 import { db } from '@/lib/db';
+import {
+  DEFAULT_EVALUATION_DATASET_DIR,
+  ensureBundledDatasetDir,
+  isBundledDatasetPath,
+} from '@/lib/demo-data';
 import { runMlEvaluation } from '@/lib/ml-service';
 import {
   buildRuleHitMetrics,
@@ -8,6 +14,31 @@ import {
 } from '@/lib/evaluation';
 
 export const runtime = 'nodejs';
+
+async function directoryExists(path: string): Promise<boolean> {
+  const fileStat = await stat(path).catch(() => null);
+  return Boolean(fileStat?.isDirectory());
+}
+
+async function resolveEvaluationDatasetDir(datasetDir?: string): Promise<string> {
+  const requested = datasetDir?.trim();
+  const configured = process.env.EVALUATION_DATASET_DIR?.trim();
+  const candidate = requested || configured || DEFAULT_EVALUATION_DATASET_DIR;
+
+  if (isBundledDatasetPath(candidate, "evaluation")) {
+    return ensureBundledDatasetDir("evaluation");
+  }
+
+  if (await directoryExists(candidate)) {
+    return candidate;
+  }
+
+  if (!requested) {
+    return ensureBundledDatasetDir("evaluation");
+  }
+
+  return candidate;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,12 +49,12 @@ export async function POST(request: NextRequest) {
       confusionMatrix?: ConfusionMatrixCounts;
     };
 
-    const datasetDir = body.datasetDir || process.env.EVALUATION_DATASET_DIR;
+    const datasetDir = await resolveEvaluationDatasetDir(body.datasetDir);
     if (!datasetDir) {
       return NextResponse.json(
         {
           error:
-            'datasetDir is required. Set EVALUATION_DATASET_DIR to a real log dataset directory or pass datasetDir in the request body.',
+            'datasetDir is required. Set EVALUATION_DATASET_DIR to a valid log dataset directory or pass datasetDir in the request body.',
         },
         { status: 400 },
       );

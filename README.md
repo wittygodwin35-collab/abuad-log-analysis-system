@@ -71,6 +71,12 @@ npm run db:push
 
 If you are not using Supabase, any reachable PostgreSQL instance will work as long as `DATABASE_URL` and `DIRECT_URL` both point to the same database.
 
+Authentication is configured with environment variables:
+
+- `AUTH_SECRET`: signing secret for the app session cookie.
+- `APP_USERNAME`: dashboard username.
+- `APP_PASSWORD`: dashboard password.
+
 Start the Python ML service:
 
 ```bash
@@ -88,6 +94,34 @@ npm run dev:local
 ```
 
 Open `http://localhost:3000`.
+
+Sign in with the credentials from `.env`.
+
+## Using The App
+
+You do not need your own log file to get started.
+
+1. Sign in on `/login`.
+2. Use one of the bundled demo incidents from the upload panel if you do not have a real log file yet.
+3. Or upload a `.log`, `.txt`, or `.json` file for analysis.
+4. Review the alert summary, parsed entries, and suspicious activity timeline.
+5. Use `Export` to download the current analysis as a real JSON file.
+
+The dashboard also supports:
+
+- Collector runs against configured server log paths.
+- Model training using the bundled normal-log dataset or a custom directory.
+- Evaluation using the bundled evaluation dataset or a custom directory.
+
+## ML Service Notes
+
+Normal analysis still works when the Python ML service is offline. In that case the app falls back to rule-based detection and stores the fallback status in pipeline metadata.
+
+Model training and evaluation are different:
+
+- `POST /api/model/train` requires a reachable `ML_SERVICE_URL`.
+- `POST /api/evaluation/run` requires a reachable `ML_SERVICE_URL`.
+- Both routes now accept bundled dataset defaults, so they fail with a clear ML-service error instead of a missing-directory error when the dataset path is valid but the Python service is unavailable.
 
 ## Evaluation
 
@@ -113,9 +147,50 @@ Example confusion-matrix payload:
 }
 ```
 
+If you do not supply a dataset directory, the app falls back to `EVALUATION_DATASET_DIR`, and if that value is left at `examples/evaluation-dataset`, a bundled demo dataset is materialized automatically.
+
+## Deploying To Netlify
+
+This repository now includes [netlify.toml](./netlify.toml), which uses:
+
+- build command: `npm run build:netlify`
+- publish directory: `.next`
+
+Before deploying, keep these platform constraints in mind:
+
+1. The Next.js app is a good fit for Netlify.
+2. The PostgreSQL database is a good fit for Netlify Functions when you keep using the pooled Supabase runtime URL.
+3. The Python ML service is not deployed by this Netlify app. Host `mini-services/ml-analyzer` separately and set `ML_SERVICE_URL` to that public service.
+4. The log collector is mainly useful on self-hosted Linux infrastructure where `/var/log/...` paths exist. On Netlify it will usually scan zero files unless you intentionally point it at another readable path source.
+
+Recommended deployment flow:
+
+1. Push the repo to GitHub.
+2. Create a new Netlify site from that repository.
+3. Add the environment variables from `.env` in Netlify with Build and Functions scope as appropriate. At minimum:
+   - `DATABASE_URL`
+   - `DIRECT_URL`
+   - `AUTH_SECRET`
+   - `APP_USERNAME`
+   - `APP_PASSWORD`
+   - `ML_SERVICE_URL`
+   - `NORMAL_LOG_DIR`
+   - `EVALUATION_DATASET_DIR`
+4. Keep `NORMAL_LOG_DIR="examples/normal-training-dataset"` and `EVALUATION_DATASET_DIR="examples/evaluation-dataset"` if you want the bundled datasets.
+5. Trigger a deploy.
+
+If you use the Netlify CLI, import environment variables before deploying:
+
+```bash
+npx netlify-cli env:import .env
+npx netlify-cli deploy --prod
+```
+
 ## Verification
 
 ```bash
+npx tsc --noEmit
 npm run test
 npm run lint
+npm run build:local
 ```

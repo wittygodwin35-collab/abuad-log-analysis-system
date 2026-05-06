@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Upload, 
@@ -24,7 +25,8 @@ import {
   BarChart3,
   RefreshCw,
   Download,
-  Trash2
+  Trash2,
+  LogOut,
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -74,6 +76,23 @@ interface AnalysisResult {
   pipeline?: PipelineMetadata;
 }
 
+interface DemoLogSummary {
+  id: string;
+  filename: string;
+  title: string;
+  description: string;
+}
+
+interface SessionState {
+  authenticated: boolean;
+  user?: {
+    name: string;
+  };
+}
+
+const DEFAULT_EVALUATION_DATASET_DIR = "examples/evaluation-dataset";
+const DEFAULT_NORMAL_LOG_DIR = "examples/normal-training-dataset";
+
 function parseMetadata(metadata: string | null): Record<string, unknown> | null {
   if (!metadata) return null;
   try {
@@ -105,6 +124,13 @@ export default function LogAnalyzerPage() {
   const [isCollectorRunning, setIsCollectorRunning] = useState(false);
   const [isRunningEvaluation, setIsRunningEvaluation] = useState(false);
   const [latestEvaluation, setLatestEvaluation] = useState<EvaluationMetrics | null>(null);
+  const [demoLogs, setDemoLogs] = useState<DemoLogSummary[]>([]);
+  const [demoLoadingId, setDemoLoadingId] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [session, setSession] = useState<SessionState | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [trainingDatasetDir, setTrainingDatasetDir] = useState(DEFAULT_NORMAL_LOG_DIR);
+  const [evaluationDatasetDir, setEvaluationDatasetDir] = useState(DEFAULT_EVALUATION_DATASET_DIR);
 
   // Fetch log files on mount
   const fetchLogFiles = useCallback(async () => {
@@ -127,6 +153,32 @@ export default function LogAnalyzerPage() {
       setCollectorStatus(data);
     } catch (error) {
       console.error("Error fetching collector status:", error);
+    }
+  }, []);
+
+  const fetchDemoLogs = useCallback(async () => {
+    try {
+      const response = await fetch("/api/demo-logs");
+      if (!response.ok) return;
+      const data = await response.json();
+      setDemoLogs(data.demoLogs || []);
+    } catch (error) {
+      console.error("Error fetching demo logs:", error);
+    }
+  }, []);
+
+  const fetchSession = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/session");
+      if (!response.ok) {
+        setSession(null);
+        return;
+      }
+      const data = (await response.json()) as SessionState;
+      setSession(data);
+    } catch (error) {
+      console.error("Error fetching session:", error);
+      setSession(null);
     }
   }, []);
 
@@ -157,7 +209,9 @@ export default function LogAnalyzerPage() {
   useEffect(() => {
     fetchLogFiles();
     fetchCollectorStatus();
-  }, [fetchLogFiles, fetchCollectorStatus]);
+    fetchDemoLogs();
+    fetchSession();
+  }, [fetchLogFiles, fetchCollectorStatus, fetchDemoLogs, fetchSession]);
 
   // Handle drag and drop
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -259,6 +313,32 @@ export default function LogAnalyzerPage() {
     }
   };
 
+  const handleAnalyzeDemoLog = async (demoLogId: string) => {
+    setDemoLoadingId(demoLogId);
+    try {
+      const response = await fetch(`/api/demo-logs/${demoLogId}/analyze`, {
+        method: "POST",
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.error || "Failed to analyze demo log");
+        return;
+      }
+
+      const result = await response.json();
+      setAnalysisResult(result);
+      setSelectedLog(result.logFile);
+      toast.success("Demo log analyzed");
+      fetchLogFiles();
+    } catch (error) {
+      console.error("Demo log analysis error:", error);
+      toast.error("An error occurred while analyzing the demo log");
+    } finally {
+      setDemoLoadingId(null);
+    }
+  };
+
   const handleDeleteLog = async (logId: string) => {
     try {
       const response = await fetch(`/api/logs/${logId}`, {
@@ -287,7 +367,9 @@ export default function LogAnalyzerPage() {
       const response = await fetch("/api/model/train", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          normalLogDir: trainingDatasetDir.trim() || undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -339,7 +421,9 @@ export default function LogAnalyzerPage() {
       const response = await fetch("/api/evaluation/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          datasetDir: evaluationDatasetDir.trim() || undefined,
+        }),
       });
 
       if (!response.ok) {
@@ -356,6 +440,57 @@ export default function LogAnalyzerPage() {
       toast.error("An error occurred while running evaluation");
     } finally {
       setIsRunningEvaluation(false);
+    }
+  };
+
+  const handleExport = async () => {
+    const logId = analysisResult?.logFile.id;
+    if (!logId) {
+      toast.error("No analysis result available to export");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const response = await fetch(`/api/logs/${logId}/export`);
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        toast.error(error.error || "Failed to export analysis");
+        return;
+      }
+
+      const blob = await response.blob();
+      const contentDisposition = response.headers.get("Content-Disposition") || "";
+      const filenameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+      const filename = filenameMatch?.[1] || "analysis.json";
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Analysis exported");
+    } catch (error) {
+      console.error("Export error:", error);
+      toast.error("An error occurred during export");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+      window.location.href = "/login";
+    } catch (error) {
+      console.error("Logout error:", error);
+      toast.error("Failed to log out");
+      setIsLoggingOut(false);
     }
   };
 
@@ -462,6 +597,16 @@ export default function LogAnalyzerPage() {
                 <Server className="h-3 w-3 mr-1 text-primary" />
                 Hybrid Environment
               </Badge>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="border-border bg-secondary/30 text-foreground hover:bg-secondary/60"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                {isLoggingOut ? "Signing out..." : session?.user?.name || "Sign out"}
+              </Button>
             </div>
           </div>
         </div>
@@ -478,15 +623,15 @@ export default function LogAnalyzerPage() {
           >
             {/* Upload Section */}
             <Card className="glass-panel overflow-hidden border-0 glow-border">
-              <CardHeader className="bg-card/40 border-b border-border/50 pb-4">
-                <CardTitle className="text-foreground flex items-center gap-2">
-                  <Upload className="h-5 w-5 text-primary" />
-                  Upload Log File
-                </CardTitle>
-                <CardDescription className="text-muted-foreground">
-                  Upload log files for analysis (.log, .txt, .json)
-                </CardDescription>
-              </CardHeader>
+                <CardHeader className="bg-card/40 border-b border-border/50 pb-4">
+                  <CardTitle className="text-foreground flex items-center gap-2">
+                    <Upload className="h-5 w-5 text-primary" />
+                    Upload Log File
+                  </CardTitle>
+                  <CardDescription className="text-muted-foreground">
+                  Upload your own log file or start with a bundled demo sample.
+                  </CardDescription>
+                </CardHeader>
               <CardContent className="pt-6">
                 <div
                   className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 ${
@@ -522,6 +667,33 @@ export default function LogAnalyzerPage() {
                     </div>
                   </div>
                 </div>
+                <div className="mt-5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground">Try A Demo Log</p>
+                    <p className="text-xs text-muted-foreground">Useful when you do not have your own file yet.</p>
+                  </div>
+                  <div className="grid gap-2">
+                    {demoLogs.map((demoLog) => (
+                      <button
+                        key={demoLog.id}
+                        type="button"
+                        onClick={() => handleAnalyzeDemoLog(demoLog.id)}
+                        disabled={Boolean(demoLoadingId)}
+                        className="w-full rounded-xl border border-border bg-card/40 px-4 py-3 text-left transition-all hover:bg-secondary/60 hover:border-border/80 disabled:opacity-60"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{demoLog.title}</p>
+                            <p className="text-xs text-muted-foreground mt-1">{demoLog.description}</p>
+                          </div>
+                          <span className="text-xs font-mono text-primary">
+                            {demoLoadingId === demoLog.id ? "Loading..." : "Run"}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 <AnimatePresence>
                   {isUploading && (
@@ -549,7 +721,7 @@ export default function LogAnalyzerPage() {
                   Pipeline Controls
                 </CardTitle>
                 <CardDescription className="text-muted-foreground">
-                  Train model, run collector, and execute evaluation
+                  Train the Python model, run the collector, and execute evaluation jobs.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 pt-6">
@@ -565,6 +737,20 @@ export default function LogAnalyzerPage() {
                   )}
                   Train Model
                 </Button>
+                <div className="space-y-2 pt-2">
+                  <label className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Training Dataset
+                  </label>
+                  <Input
+                    value={trainingDatasetDir}
+                    onChange={(event) => setTrainingDatasetDir(event.target.value)}
+                    placeholder={DEFAULT_NORMAL_LOG_DIR}
+                    className="font-mono text-xs"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Leave the bundled baseline in place or point to another directory of normal logs.
+                  </p>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     onClick={handleRunCollector}
@@ -593,6 +779,26 @@ export default function LogAnalyzerPage() {
                     Evaluation
                   </Button>
                 </div>
+                <div className="space-y-2 pt-2">
+                  <label className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Evaluation Dataset
+                  </label>
+                  <Input
+                    value={evaluationDatasetDir}
+                    onChange={(event) => setEvaluationDatasetDir(event.target.value)}
+                    placeholder={DEFAULT_EVALUATION_DATASET_DIR}
+                    className="font-mono text-xs"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Keep the bundled default or replace it with another dataset directory.
+                  </p>
+                </div>
+                <p className="text-xs text-muted-foreground pt-1">
+                  Collector paths are most useful on self-hosted Linux deployments where real server logs are readable.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Model training and evaluation require a reachable ML service in <span className="font-mono">ML_SERVICE_URL</span>.
+                </p>
                 <div className="text-xs text-muted-foreground space-y-1 pt-3 border-t border-border/50 font-mono mt-2">
                   <div className="flex justify-between items-center">
                     <span>Status:</span> 
@@ -936,9 +1142,15 @@ export default function LogAnalyzerPage() {
                         Detected Suspicious Activities
                       </CardTitle>
                       <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" className="border-border bg-secondary/30 text-foreground hover:bg-secondary/60 transition-all">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleExport}
+                          disabled={isExporting}
+                          className="border-border bg-secondary/30 text-foreground hover:bg-secondary/60 transition-all"
+                        >
                           <Download className="h-4 w-4 mr-1 text-primary" />
-                          Export
+                          {isExporting ? "Exporting..." : "Export"}
                         </Button>
                       </div>
                     </div>
@@ -1071,9 +1283,9 @@ export default function LogAnalyzerPage() {
                     </motion.div>
                     <h3 className="text-3xl font-bold text-foreground mb-4 tracking-tight glow-text">No Analysis Yet</h3>
                     <p className="text-muted-foreground mb-10 max-w-lg mx-auto text-lg leading-relaxed">
-                      Upload a log file to start analyzing for suspicious activities. 
-                      The system will detect failed logins, brute force attempts, 
-                      privilege escalation, and other anomalies using hybrid ML models.
+                      Upload a log file, run one of the bundled demo incidents, or collect from configured server paths.
+                      The system detects failed logins, brute force attempts, privilege escalation, and related anomalies
+                      with a hybrid rules-plus-ML pipeline.
                     </p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-medium">
                       <div className="p-4 rounded-xl bg-card/40 border border-border hover:bg-secondary/50 transition-all hover:-translate-y-1">

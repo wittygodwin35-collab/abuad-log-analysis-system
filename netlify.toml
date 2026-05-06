@@ -1,0 +1,6 @@
+[build]
+  command = "npm run build:netlify"
+  publish = ".next"
+
+[functions]
+  node_bundler = "esbuild"

@@ -1,10 +1,10 @@
-import { PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient } from '@prisma/client'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-const prismaLogLevels =
+const prismaLogLevels: Prisma.LogLevel[] =
   process.env.PRISMA_LOG_QUERIES === 'true'
     ? ['query', 'warn', 'error']
     : ['warn', 'error']
