@@ -37,12 +37,19 @@ async function resolveNormalLogDir(normalLogDir?: string): Promise<string> {
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
+      datasetName?: string;
       normalLogDir?: string;
+      normalLogContent?: string;
       maxSamples?: number;
     };
+    const normalLogContent =
+      typeof body.normalLogContent === 'string' ? body.normalLogContent : undefined;
 
     const result = await trainMlModel({
-      normalLogDir: await resolveNormalLogDir(body.normalLogDir),
+      normalLogContent,
+      normalLogDir: normalLogContent
+        ? body.datasetName || 'uploaded-training-dataset'
+        : await resolveNormalLogDir(body.normalLogDir),
       maxSamples: body.maxSamples,
     });
 

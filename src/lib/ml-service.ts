@@ -154,6 +154,7 @@ export async function analyzeWithMl(payload: {
 
 export async function trainMlModel(payload: {
   normalLogDir?: string;
+  normalLogContent?: string;
   maxSamples?: number;
 }): Promise<AvailabilityResponse<MlTrainResponse>> {
   if (!shouldUseExternalMlService()) {
@@ -162,6 +163,7 @@ export async function trainMlModel(payload: {
         available: true,
         data: await trainInternalMlModel({
           maxSamples: payload.maxSamples,
+          normalLogContent: payload.normalLogContent,
           normalLogDir: payload.normalLogDir || '',
         }),
       };
@@ -189,6 +191,7 @@ export async function trainMlModel(payload: {
 }
 
 export async function runMlEvaluation(payload: {
+  datasetContent?: string;
   datasetDir: string;
   sampleMin?: number;
   sampleMax?: number;

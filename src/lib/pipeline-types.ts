@@ -80,9 +80,32 @@ export interface EvaluationMetrics {
   ruleHitCounts?: Record<string, number>;
   ruleSampleCount?: number;
   labelledSampleCount?: number;
+  classificationReport?: Array<{
+    label: string;
+    precision: number;
+    recall: number;
+    f1Score: number;
+    support: number;
+  }>;
   classConfusionMatrix?: Record<string, Record<string, number>>;
   classLabels?: string[];
+  confidenceCurve?: Array<{
+    f1Score: number;
+    precision: number;
+    recall: number;
+    threshold: number;
+  }>;
   multiclassAccuracy?: number;
+  precisionRecallCurve?: Array<{
+    precision: number;
+    recall: number;
+    threshold: number;
+  }>;
+  rocCurve?: Array<{
+    falsePositiveRate: number;
+    threshold: number;
+    truePositiveRate: number;
+  }>;
   thresholds?: Record<string, number>;
   confusionMatrix?: {
     truePositive: number;

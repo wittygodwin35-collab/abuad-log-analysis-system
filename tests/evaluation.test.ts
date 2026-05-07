@@ -116,6 +116,25 @@ describe('evaluation metrics', () => {
     expect(metrics?.classConfusionMatrix.brute_force.brute_force).toBe(5);
     expect(metrics?.classConfusionMatrix.sql_injection.sql_injection).toBe(1);
     expect(metrics?.classConfusionMatrix.path_traversal.path_traversal).toBe(1);
+    expect(metrics?.classificationReport.find((row) => row.label === 'brute_force')?.support).toBe(5);
+    expect(metrics?.precisionRecallCurve.length).toBeGreaterThan(0);
+    expect(metrics?.rocCurve.length).toBeGreaterThan(0);
+    expect(metrics?.confidenceCurve.length).toBeGreaterThan(0);
+  });
+
+  it('builds rule metrics from uploaded dataset content', async () => {
+    const metrics = await buildRuleHitMetrics({
+      datasetContent: [
+        'Jan 15 08:23:45 server sshd[12345]: Failed password for invalid user admin from 192.168.1.50 port 22',
+        'Jan 15 08:23:46 server sshd[12345]: Failed password for invalid user root from 192.168.1.50 port 22',
+        'Jan 15 08:23:47 server sshd[12345]: Failed password for invalid user test from 192.168.1.50 port 22',
+      ].join('\n'),
+      sampleMin: 3,
+      sampleMax: 10,
+    });
+
+    expect(metrics.sampleCount).toBe(3);
+    expect(metrics.ruleHitCounts.failed_login).toBe(3);
   });
 
   it('fails clearly when the requested sample minimum is not met', async () => {

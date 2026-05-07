@@ -347,6 +347,24 @@ async function readLinesFromDir(
   return lines;
 }
 
+function readLinesFromContent(content: string, maxSamples?: number): string[] {
+  const lines: string[] = [];
+
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    lines.push(trimmed);
+    if (maxSamples && lines.length >= maxSamples) {
+      break;
+    }
+  }
+
+  return lines;
+}
+
 function mergeTemplateTokens(current: string[], incoming: string[]): string[] {
   return current.map((token, index) => (token === incoming[index] ? token : TEMPLATE_WILDCARD));
 }
@@ -468,8 +486,12 @@ async function persistRuntimeState(state: PersistedMlState): Promise<void> {
 async function trainRuntime(
   normalLogDir: string,
   maxSamples?: number,
+  normalLogContent?: string,
 ): Promise<PersistedMlState> {
-  const lines = await readLinesFromDir(normalLogDir, maxSamples);
+  const lines =
+    typeof normalLogContent === 'string'
+      ? readLinesFromContent(normalLogContent, maxSamples)
+      : await readLinesFromDir(normalLogDir, maxSamples);
 
   if (!lines.length) {
     throw new MlInputError(
@@ -682,9 +704,14 @@ export async function getInternalMlHealth(): Promise<Record<string, unknown>> {
 
 export async function trainInternalMlModel(payload: {
   maxSamples?: number;
+  normalLogContent?: string;
   normalLogDir: string;
 }): Promise<InternalMlTrainResponse> {
-  const state = await trainRuntime(payload.normalLogDir, payload.maxSamples);
+  const state = await trainRuntime(
+    payload.normalLogDir,
+    payload.maxSamples,
+    payload.normalLogContent,
+  );
   await persistRuntimeState(state);
 
   return {
@@ -724,6 +751,7 @@ export async function analyzeWithInternalMl(payload: {
 }
 
 export async function runInternalMlEvaluation(payload: {
+  datasetContent?: string;
   datasetDir: string;
   sampleMax?: number;
   sampleMin?: number;
@@ -735,7 +763,10 @@ export async function runInternalMlEvaluation(payload: {
     throw new MlInputError('sampleMin/sampleMax values are invalid.');
   }
 
-  const lines = await readLinesFromDir(payload.datasetDir);
+  const lines =
+    typeof payload.datasetContent === 'string'
+      ? readLinesFromContent(payload.datasetContent)
+      : await readLinesFromDir(payload.datasetDir);
   if (!lines.length) {
     throw new MlInputError(
       `No usable .log/.txt/.json lines found in datasetDir: ${payload.datasetDir}`,

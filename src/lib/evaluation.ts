@@ -35,6 +35,33 @@ export interface ConfusionMatrixMetrics extends ConfusionMatrixCounts {
   f1Score: number;
 }
 
+export interface ClassificationReportRow {
+  label: string;
+  precision: number;
+  recall: number;
+  f1Score: number;
+  support: number;
+}
+
+export interface PrecisionRecallPoint {
+  precision: number;
+  recall: number;
+  threshold: number;
+}
+
+export interface RocPoint {
+  falsePositiveRate: number;
+  threshold: number;
+  truePositiveRate: number;
+}
+
+export interface ConfidenceCurvePoint {
+  f1Score: number;
+  precision: number;
+  recall: number;
+  threshold: number;
+}
+
 export interface LabelledEvaluationRecord {
   label: EvaluationTruthLabel;
   line: string;
@@ -44,8 +71,12 @@ export interface LabelledEvaluationMetrics {
   labelledSampleCount: number;
   classConfusionMatrix: Record<string, Record<string, number>>;
   classLabels: string[];
+  classificationReport: ClassificationReportRow[];
+  confidenceCurve: ConfidenceCurvePoint[];
   confusionMatrix: ConfusionMatrixMetrics;
   multiclassAccuracy: number;
+  precisionRecallCurve: PrecisionRecallPoint[];
+  rocCurve: RocPoint[];
   thresholds: ReturnType<typeof getAnalysisThresholds>;
 }
 
@@ -83,6 +114,23 @@ function countRuleHits(content: string): Record<string, number> {
     counts[activity.activityType] = (counts[activity.activityType] || 0) + 1;
   }
   return counts;
+}
+
+function linesFromContent(content: string, sampleMax?: number): string[] {
+  const lines: string[] = [];
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    lines.push(trimmed);
+    if (sampleMax && lines.length >= sampleMax) {
+      break;
+    }
+  }
+
+  return lines;
 }
 
 function normalizeTruthLabel(value: unknown): EvaluationTruthLabel | null {
@@ -185,6 +233,13 @@ function predictionPriority(label: EvaluationTruthLabel): number {
   }
 }
 
+function predictionConfidence(label: EvaluationTruthLabel): number {
+  if (label === 'safe') {
+    return 0.02;
+  }
+  return predictionPriority(label) / 100;
+}
+
 function getActivityLineNumbers(
   activity: SuspiciousActivity,
   rawLineIndex: Map<string, number[]>,
@@ -281,10 +336,123 @@ export async function collectLabelledEvaluationRecords(
   return records;
 }
 
+function collectLabelledEvaluationRecordsFromContent(
+  datasetContent: string,
+): LabelledEvaluationRecord[] {
+  const records: LabelledEvaluationRecord[] = [];
+  for (const line of datasetContent.split(/\r?\n/)) {
+    try {
+      const record = parseLabelRecord(line);
+      if (record) {
+        records.push(record);
+      }
+    } catch {
+      continue;
+    }
+  }
+  return records;
+}
+
+function buildClassificationReport(input: {
+  classConfusionMatrix: Record<string, Record<string, number>>;
+  classLabels: string[];
+}): ClassificationReportRow[] {
+  return input.classLabels.map((label) => {
+    const truePositive = input.classConfusionMatrix[label]?.[label] || 0;
+    const falsePositive = input.classLabels.reduce((sum, actual) => {
+      return actual === label ? sum : sum + (input.classConfusionMatrix[actual]?.[label] || 0);
+    }, 0);
+    const falseNegative = input.classLabels.reduce((sum, predicted) => {
+      return predicted === label ? sum : sum + (input.classConfusionMatrix[label]?.[predicted] || 0);
+    }, 0);
+    const support = input.classLabels.reduce((sum, predicted) => {
+      return sum + (input.classConfusionMatrix[label]?.[predicted] || 0);
+    }, 0);
+    const precision = safeDivide(truePositive, truePositive + falsePositive);
+    const recall = safeDivide(truePositive, truePositive + falseNegative);
+
+    return {
+      f1Score: safeDivide(2 * precision * recall, precision + recall),
+      label,
+      precision,
+      recall,
+      support,
+    };
+  });
+}
+
+function buildThresholdCurveMetrics(input: {
+  actualThreats: boolean[];
+  confidenceScores: number[];
+}): {
+  confidenceCurve: ConfidenceCurvePoint[];
+  precisionRecallCurve: PrecisionRecallPoint[];
+  rocCurve: RocPoint[];
+} {
+  const thresholdSet = new Set<number>([0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]);
+  for (const score of input.confidenceScores) {
+    thresholdSet.add(Number(score.toFixed(3)));
+  }
+
+  const thresholds = [...thresholdSet].sort((left, right) => left - right);
+  const confidenceCurve: ConfidenceCurvePoint[] = [];
+  const precisionRecallCurve: PrecisionRecallPoint[] = [];
+  const rocCurve: RocPoint[] = [];
+
+  for (const threshold of thresholds) {
+    const counts: ConfusionMatrixCounts = {
+      falseNegative: 0,
+      falsePositive: 0,
+      trueNegative: 0,
+      truePositive: 0,
+    };
+
+    for (let index = 0; index < input.actualThreats.length; index += 1) {
+      const actualThreat = input.actualThreats[index];
+      const predictedThreat = input.confidenceScores[index] >= threshold;
+
+      if (actualThreat && predictedThreat) counts.truePositive += 1;
+      if (!actualThreat && predictedThreat) counts.falsePositive += 1;
+      if (actualThreat && !predictedThreat) counts.falseNegative += 1;
+      if (!actualThreat && !predictedThreat) counts.trueNegative += 1;
+    }
+
+    const metrics = calculateConfusionMatrixMetrics(counts);
+    confidenceCurve.push({
+      f1Score: metrics.f1Score,
+      precision: metrics.precision,
+      recall: metrics.recall,
+      threshold,
+    });
+    precisionRecallCurve.push({
+      precision: metrics.precision,
+      recall: metrics.recall,
+      threshold,
+    });
+    rocCurve.push({
+      falsePositiveRate: safeDivide(counts.falsePositive, counts.falsePositive + counts.trueNegative),
+      threshold,
+      truePositiveRate: metrics.recall,
+    });
+  }
+
+  return {
+    confidenceCurve,
+    precisionRecallCurve,
+    rocCurve,
+  };
+}
+
 export async function buildLabelledEvaluationMetrics(input: {
-  datasetDir: string;
+  datasetContent?: string;
+  datasetDir?: string;
 }): Promise<LabelledEvaluationMetrics | null> {
-  const records = await collectLabelledEvaluationRecords(input.datasetDir);
+  const records =
+    typeof input.datasetContent === 'string'
+      ? collectLabelledEvaluationRecordsFromContent(input.datasetContent)
+      : input.datasetDir
+        ? await collectLabelledEvaluationRecords(input.datasetDir)
+        : [];
   if (!records.length) {
     return null;
   }
@@ -300,17 +468,20 @@ export async function buildLabelledEvaluationMetrics(input: {
   });
 
   const predictions: EvaluationTruthLabel[] = records.map(() => 'safe');
+  const confidenceScores = records.map(() => predictionConfidence('safe'));
   const priorities = records.map(() => 0);
 
   for (const activity of analysis.activities) {
     const predictedLabel = classifyActivity(activity);
     const priority = predictionPriority(predictedLabel);
+    const confidence = predictionConfidence(predictedLabel);
     for (const lineNumber of getActivityLineNumbers(activity, rawLineIndex)) {
       const index = lineNumber - 1;
       if (index < 0 || index >= predictions.length || priority < priorities[index]) {
         continue;
       }
       predictions[index] = predictedLabel;
+      confidenceScores[index] = confidence;
       priorities[index] = priority;
     }
   }
@@ -358,24 +529,44 @@ export async function buildLabelledEvaluationMetrics(input: {
     classConfusionMatrix[actual] = classConfusionMatrix[actual] || {};
     for (const predicted of classLabels) {
       classConfusionMatrix[actual][predicted] =
-        classConfusionMatrix[actual][predicted] || 0;
+      classConfusionMatrix[actual][predicted] || 0;
     }
   }
+  const curves = buildThresholdCurveMetrics({
+    actualThreats: records.map((record) => isThreatLabel(record.label)),
+    confidenceScores,
+  });
 
   return {
     labelledSampleCount: records.length,
     classConfusionMatrix,
     classLabels,
+    classificationReport: buildClassificationReport({
+      classConfusionMatrix,
+      classLabels,
+    }),
+    confidenceCurve: curves.confidenceCurve,
     confusionMatrix: calculateConfusionMatrixMetrics(counts),
     multiclassAccuracy: records.length ? classCorrect / records.length : 0,
+    precisionRecallCurve: curves.precisionRecallCurve,
+    rocCurve: curves.rocCurve,
     thresholds: getAnalysisThresholds(),
   };
 }
 
 export async function collectEvaluationSample(input: {
-  datasetDir: string;
+  datasetContent?: string;
+  datasetDir?: string;
   sampleMax: number;
 }): Promise<string[]> {
+  if (typeof input.datasetContent === 'string') {
+    return linesFromContent(input.datasetContent, input.sampleMax);
+  }
+
+  if (!input.datasetDir) {
+    throw new Error('Evaluation dataset directory or content is required.');
+  }
+
   const root = await stat(input.datasetDir).catch(() => null);
   if (!root?.isDirectory()) {
     throw new Error(
@@ -427,7 +618,8 @@ export async function collectEvaluationSample(input: {
 }
 
 export async function buildRuleHitMetrics(input: {
-  datasetDir: string;
+  datasetContent?: string;
+  datasetDir?: string;
   sampleMin?: number;
   sampleMax: number;
 }): Promise<{

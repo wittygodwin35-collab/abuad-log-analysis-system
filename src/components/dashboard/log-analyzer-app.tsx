@@ -10,6 +10,14 @@ import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { EvaluationReport } from "@/components/dashboard/evaluation-report";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   Upload, 
@@ -100,6 +108,14 @@ interface ApiErrorPayload {
 const DEFAULT_EVALUATION_DATASET_DIR = "examples/evaluation-dataset";
 const DEFAULT_NORMAL_LOG_DIR = "examples/normal-training-dataset";
 const SAMPLE_UPLOAD_LOG_PATH = "/sample-logs/loghub-linux-2k.log";
+const LOGHUB_SAMPLE_NAME = "loghub-linux-2k.log";
+
+type DatasetMode = "default" | "loghub" | "upload" | "path";
+
+interface UploadedDataset {
+  content: string;
+  name: string;
+}
 
 export type DashboardPage = "dashboard" | "upload" | "pipeline" | "logs" | "results";
 
@@ -146,8 +162,23 @@ function parsePipelineMetadata(value: string | null): PipelineMetadata | null {
   }
 }
 
-function formatRatio(value: number | null | undefined): string {
-  return typeof value === "number" ? value.toFixed(3) : "n/a";
+async function readTextFile(file: File): Promise<UploadedDataset> {
+  return {
+    content: await file.text(),
+    name: file.name,
+  };
+}
+
+async function fetchBundledLoghubDataset(): Promise<UploadedDataset> {
+  const response = await fetch(SAMPLE_UPLOAD_LOG_PATH);
+  if (!response.ok) {
+    throw new Error("Unable to load the bundled Loghub sample.");
+  }
+
+  return {
+    content: await response.text(),
+    name: LOGHUB_SAMPLE_NAME,
+  };
 }
 
 export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
@@ -170,8 +201,12 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [session, setSession] = useState<SessionState | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [trainingDatasetMode, setTrainingDatasetMode] = useState<DatasetMode>("default");
   const [trainingDatasetDir, setTrainingDatasetDir] = useState(DEFAULT_NORMAL_LOG_DIR);
+  const [trainingUploadedDataset, setTrainingUploadedDataset] = useState<UploadedDataset | null>(null);
+  const [evaluationDatasetMode, setEvaluationDatasetMode] = useState<DatasetMode>("default");
   const [evaluationDatasetDir, setEvaluationDatasetDir] = useState(DEFAULT_EVALUATION_DATASET_DIR);
+  const [evaluationUploadedDataset, setEvaluationUploadedDataset] = useState<UploadedDataset | null>(null);
   const [lastCollectorResult, setLastCollectorResult] = useState<CollectorRunResponse | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
 
@@ -442,15 +477,90 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
     }
   };
 
+  async function getTrainingDatasetPayload(): Promise<{
+    datasetName?: string;
+    normalLogContent?: string;
+    normalLogDir?: string;
+  }> {
+    if (trainingDatasetMode === "loghub") {
+      const dataset = await fetchBundledLoghubDataset();
+      return {
+        datasetName: dataset.name,
+        normalLogContent: dataset.content,
+      };
+    }
+
+    if (trainingDatasetMode === "upload") {
+      if (!trainingUploadedDataset) {
+        throw new Error("Choose a training log file first.");
+      }
+      return {
+        datasetName: trainingUploadedDataset.name,
+        normalLogContent: trainingUploadedDataset.content,
+      };
+    }
+
+    return {
+      normalLogDir:
+        trainingDatasetMode === "path"
+          ? trainingDatasetDir.trim() || undefined
+          : DEFAULT_NORMAL_LOG_DIR,
+    };
+  }
+
+  async function getEvaluationDatasetPayload(): Promise<{
+    datasetContent?: string;
+    datasetDir?: string;
+    datasetName?: string;
+  }> {
+    if (evaluationDatasetMode === "loghub") {
+      const dataset = await fetchBundledLoghubDataset();
+      return {
+        datasetContent: dataset.content,
+        datasetName: dataset.name,
+      };
+    }
+
+    if (evaluationDatasetMode === "upload") {
+      if (!evaluationUploadedDataset) {
+        throw new Error("Choose an evaluation log file first.");
+      }
+      return {
+        datasetContent: evaluationUploadedDataset.content,
+        datasetName: evaluationUploadedDataset.name,
+      };
+    }
+
+    return {
+      datasetDir:
+        evaluationDatasetMode === "path"
+          ? evaluationDatasetDir.trim() || undefined
+          : DEFAULT_EVALUATION_DATASET_DIR,
+    };
+  }
+
+  async function handleTrainingDatasetFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setTrainingUploadedDataset(await readTextFile(file));
+    setTrainingDatasetMode("upload");
+  }
+
+  async function handleEvaluationDatasetFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setEvaluationUploadedDataset(await readTextFile(file));
+    setEvaluationDatasetMode("upload");
+  }
+
   const handleTrainModel = async () => {
     setIsTrainingModel(true);
     try {
+      const datasetPayload = await getTrainingDatasetPayload();
       const response = await fetch("/api/model/train", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          normalLogDir: trainingDatasetDir.trim() || undefined,
-        }),
+        body: JSON.stringify(datasetPayload),
       });
 
       if (!response.ok) {
@@ -466,7 +576,9 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
       toast.success(`Model trained with ${result.trainedSamples ?? 0} samples`);
     } catch (error) {
       console.error("Train model error:", error);
-      toast.error("An error occurred during model training");
+      const message = error instanceof Error ? error.message : "An error occurred during model training";
+      setPipelineError(message);
+      toast.error(message);
     } finally {
       setIsTrainingModel(false);
     }
@@ -501,7 +613,9 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
       fetchCollectorStatus();
     } catch (error) {
       console.error("Collector run error:", error);
-      toast.error("An error occurred while running collector");
+      const message = error instanceof Error ? error.message : "An error occurred while running collector";
+      setPipelineError(message);
+      toast.error(message);
     } finally {
       setIsCollectorRunning(false);
     }
@@ -510,12 +624,11 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
   const handleRunEvaluation = async () => {
     setIsRunningEvaluation(true);
     try {
+      const datasetPayload = await getEvaluationDatasetPayload();
       const response = await fetch("/api/evaluation/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          datasetDir: evaluationDatasetDir.trim() || undefined,
-        }),
+        body: JSON.stringify(datasetPayload),
       });
 
       if (!response.ok) {
@@ -534,7 +647,9 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
       toast.success(`Evaluation completed: ${sampleCount} samples, ${templateCount} templates`);
     } catch (error) {
       console.error("Evaluation error:", error);
-      toast.error("An error occurred while running evaluation");
+      const message = error instanceof Error ? error.message : "An error occurred while running evaluation";
+      setPipelineError(message);
+      toast.error(message);
     } finally {
       setIsRunningEvaluation(false);
     }
@@ -593,11 +708,11 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
 
   const getSeverityColor = (severity: string) => {
     switch (severity) {
-      case "critical": return "bg-red-500 text-white";
-      case "high": return "bg-orange-500 text-white";
-      case "medium": return "bg-yellow-500 text-black";
-      case "low": return "bg-green-500 text-white";
-      default: return "bg-gray-500 text-white";
+      case "critical": return "border border-destructive/40 bg-destructive/10 text-destructive";
+      case "high": return "border border-border bg-muted/60 text-foreground";
+      case "medium": return "border border-border bg-muted/45 text-foreground";
+      case "low": return "border border-border bg-background/70 text-muted-foreground";
+      default: return "border border-border bg-background/70 text-muted-foreground";
     }
   };
 
@@ -619,10 +734,10 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "completed": return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case "processing": return <RefreshCw className="h-4 w-4 text-blue-500 animate-spin" />;
-      case "error": return <XCircle className="h-4 w-4 text-red-500" />;
-      default: return <Clock className="h-4 w-4 text-gray-500" />;
+      case "completed": return <CheckCircle className="h-4 w-4 text-foreground" />;
+      case "processing": return <RefreshCw className="h-4 w-4 text-muted-foreground animate-spin" />;
+      case "error": return <XCircle className="h-4 w-4 text-destructive" />;
+      default: return <Clock className="h-4 w-4 text-muted-foreground" />;
     }
   };
 
@@ -882,14 +997,41 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   <label className="text-xs uppercase tracking-widest text-muted-foreground">
                     Training Dataset
                   </label>
-                  <Input
-                    value={trainingDatasetDir}
-                    onChange={(event) => setTrainingDatasetDir(event.target.value)}
-                    placeholder={DEFAULT_NORMAL_LOG_DIR}
-                    className="font-mono text-xs"
-                  />
+                  <Select value={trainingDatasetMode} onValueChange={(value) => setTrainingDatasetMode(value as DatasetMode)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose training dataset" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Bundled normal baseline</SelectItem>
+                      <SelectItem value="loghub">Open-access Loghub Linux sample</SelectItem>
+                      <SelectItem value="upload">Upload a local log file</SelectItem>
+                      <SelectItem value="path">Server path or directory</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {trainingDatasetMode === "path" && (
+                    <Input
+                      value={trainingDatasetDir}
+                      onChange={(event) => setTrainingDatasetDir(event.target.value)}
+                      placeholder={DEFAULT_NORMAL_LOG_DIR}
+                      className="font-mono text-xs"
+                    />
+                  )}
+                  {trainingDatasetMode === "upload" && (
+                    <Input
+                      type="file"
+                      accept=".log,.txt,.json"
+                      onChange={handleTrainingDatasetFile}
+                      className="text-xs"
+                    />
+                  )}
                   <p className="text-xs text-muted-foreground">
-                    Leave the bundled baseline in place or point to another directory of normal logs.
+                    {trainingDatasetMode === "upload" && trainingUploadedDataset
+                      ? `Selected ${trainingUploadedDataset.name}.`
+                      : trainingDatasetMode === "loghub"
+                        ? "Uses the real Loghub Linux sample from the Upload page."
+                        : trainingDatasetMode === "path"
+                          ? "Use this only for self-hosted deployments where the server can read the path."
+                          : "Uses the bundled baseline of normal logs."}
                   </p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -926,14 +1068,41 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   <label className="text-xs uppercase tracking-widest text-muted-foreground">
                     Evaluation Dataset
                   </label>
-                  <Input
-                    value={evaluationDatasetDir}
-                    onChange={(event) => setEvaluationDatasetDir(event.target.value)}
-                    placeholder={DEFAULT_EVALUATION_DATASET_DIR}
-                    className="font-mono text-xs"
-                  />
+                  <Select value={evaluationDatasetMode} onValueChange={(value) => setEvaluationDatasetMode(value as DatasetMode)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose evaluation dataset" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="default">Bundled labelled evaluation set</SelectItem>
+                      <SelectItem value="loghub">Open-access Loghub Linux sample</SelectItem>
+                      <SelectItem value="upload">Upload a local log file</SelectItem>
+                      <SelectItem value="path">Server path or directory</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {evaluationDatasetMode === "path" && (
+                    <Input
+                      value={evaluationDatasetDir}
+                      onChange={(event) => setEvaluationDatasetDir(event.target.value)}
+                      placeholder={DEFAULT_EVALUATION_DATASET_DIR}
+                      className="font-mono text-xs"
+                    />
+                  )}
+                  {evaluationDatasetMode === "upload" && (
+                    <Input
+                      type="file"
+                      accept=".log,.txt,.json"
+                      onChange={handleEvaluationDatasetFile}
+                      className="text-xs"
+                    />
+                  )}
                   <p className="text-xs text-muted-foreground">
-                    Keep the bundled default or replace it with another dataset directory.
+                    {evaluationDatasetMode === "upload" && evaluationUploadedDataset
+                      ? `Selected ${evaluationUploadedDataset.name}.`
+                      : evaluationDatasetMode === "loghub"
+                        ? "Runs evaluation over the same real Loghub Linux sample used by the Upload page."
+                        : evaluationDatasetMode === "path"
+                          ? "Use this only for self-hosted deployments where the server can read the path."
+                          : "Uses the bundled labelled set for classification metrics and curves."}
                   </p>
                 </div>
                 <p className="text-xs text-muted-foreground pt-1">
@@ -946,7 +1115,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   <div className="flex justify-between items-center">
                     <span>Status:</span> 
                     <span className="text-foreground flex items-center gap-1">
-                      <span className={`w-2 h-2 rounded-full ${collectorStatusLabel === 'running' ? 'bg-chart-3 animate-pulse' : 'bg-muted-foreground'}`}></span>
+                      <span className={`w-2 h-2 rounded-full ${collectorStatusLabel === 'running' ? 'bg-foreground animate-pulse' : 'bg-muted-foreground'}`}></span>
                       {collectorStatusLabel}
                     </span>
                   </div>
@@ -969,28 +1138,21 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                           {lastCollectorResult.filesScanned} files scanned, {lastCollectorResult.linesIngested} lines ingested, {lastCollectorResult.logFilesCreated} log files created.
                         </p>
                         {lastCollectorResult.filesScanned === 0 && (
-                          <p className="text-xs leading-5 text-chart-4">
-                            No default Linux log paths were readable on this machine. Set LOG_COLLECTOR_PATHS to a readable local file path or use the upload page sample.
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            The hosted deployment cannot usually read operating-system log paths such as /var/log. Use the Loghub sample or upload a local log file for browser-based tests; set LOG_COLLECTOR_PATHS only on self-hosted deployments with readable server log paths.
                           </p>
                         )}
                       </div>
                     )}
                     {latestEvaluation && (
-                      <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground">Evaluation Result</p>
-                        <p className="text-sm text-foreground">
-                          Samples: {String(latestEvaluation.sampleCount ?? latestEvaluation.ruleSampleCount ?? "n/a")} | Templates: {String(latestEvaluation.templateCount ?? "n/a")} | Anomaly rate: {typeof latestEvaluation.anomalyRate === "number" ? latestEvaluation.anomalyRate.toFixed(4) : "n/a"}
-                        </p>
-                        {latestEvaluation.confusionMatrix && (
-                          <p className="text-xs leading-5 text-muted-foreground">
-                            Labelled: {String(latestEvaluation.labelledSampleCount ?? "manual")} | Accuracy: {formatRatio(latestEvaluation.confusionMatrix.accuracy)} | Precision: {formatRatio(latestEvaluation.confusionMatrix.precision)} | Recall: {formatRatio(latestEvaluation.confusionMatrix.recall)} | F1: {formatRatio(latestEvaluation.confusionMatrix.f1Score)}
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-widest text-muted-foreground">Evaluation Result</p>
+                          <p className="text-sm text-foreground">
+                            Samples: {String(latestEvaluation.sampleCount ?? latestEvaluation.ruleSampleCount ?? "n/a")} | Templates: {String(latestEvaluation.templateCount ?? "n/a")} | Anomaly rate: {typeof latestEvaluation.anomalyRate === "number" ? latestEvaluation.anomalyRate.toFixed(4) : "n/a"}
                           </p>
-                        )}
-                        {typeof latestEvaluation.multiclassAccuracy === "number" && (
-                          <p className="text-xs leading-5 text-muted-foreground">
-                            Class accuracy: {formatRatio(latestEvaluation.multiclassAccuracy)} across {latestEvaluation.classLabels?.join(", ") || "truth-table labels"}.
-                          </p>
-                        )}
+                        </div>
+                        <EvaluationReport metrics={latestEvaluation} />
                       </div>
                     )}
                   </div>
@@ -1138,56 +1300,26 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
               <div className="space-y-6">
                 {/* Summary Cards */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  <motion.div whileHover={{ y: -5 }} transition={{ type: "spring", stiffness: 300 }}>
-                    <Card className="glass-panel border-0">
+                  {[
+                    { label: "Total Alerts", value: analysisResult.summary.total, marker: "var(--border)", valueClass: "text-foreground" },
+                    { label: "Critical", value: analysisResult.summary.critical, marker: "var(--destructive)", valueClass: "text-destructive" },
+                    { label: "High", value: analysisResult.summary.high, marker: "var(--muted-foreground)", valueClass: "text-foreground" },
+                    { label: "Medium", value: analysisResult.summary.medium, marker: "var(--muted-foreground)", valueClass: "text-foreground" },
+                    { label: "Low", value: analysisResult.summary.low, marker: "var(--muted-foreground)", valueClass: "text-foreground" },
+                  ].map((item) => (
+                    <Card
+                      key={item.label}
+                      className="border border-border border-l-4 bg-card/70 shadow-sm"
+                      style={{ borderLeftColor: item.marker }}
+                    >
                       <CardContent className="p-4">
                         <div className="min-w-0 text-center">
-                          <p className="text-2xl font-bold leading-tight text-foreground glow-text">{analysisResult.summary.total}</p>
-                          <p className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground font-mono">Total Alerts</p>
+                          <p className={`text-2xl font-bold leading-tight ${item.valueClass}`}>{item.value}</p>
+                          <p className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground font-mono">{item.label}</p>
                         </div>
                       </CardContent>
                     </Card>
-                  </motion.div>
-                  <motion.div whileHover={{ y: -5 }} transition={{ type: "spring", stiffness: 300 }}>
-                    <Card className="bg-destructive/10 border-destructive/30 border shadow-[0_0_15px_oklch(var(--color-destructive)/0.15)]">
-                      <CardContent className="p-4">
-                        <div className="min-w-0 text-center">
-                          <p className="text-2xl font-bold leading-tight text-destructive" style={{ textShadow: "0 0 10px oklch(var(--color-destructive)/0.5)" }}>{analysisResult.summary.critical}</p>
-                          <p className="mt-2 text-[11px] uppercase tracking-wide text-destructive/80 font-mono">Critical</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                  <motion.div whileHover={{ y: -5 }} transition={{ type: "spring", stiffness: 300 }}>
-                    <Card className="bg-chart-4/10 border-chart-4/30 border shadow-[0_0_15px_oklch(var(--color-chart-4)/0.15)]">
-                      <CardContent className="p-4">
-                        <div className="min-w-0 text-center">
-                          <p className="text-2xl font-bold leading-tight text-chart-4" style={{ textShadow: "0 0 10px oklch(var(--color-chart-4)/0.5)" }}>{analysisResult.summary.high}</p>
-                          <p className="mt-2 text-[11px] uppercase tracking-wide text-chart-4/80 font-mono">High</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                  <motion.div whileHover={{ y: -5 }} transition={{ type: "spring", stiffness: 300 }}>
-                    <Card className="bg-chart-5/10 border-chart-5/30 border shadow-[0_0_15px_oklch(var(--color-chart-5)/0.15)]">
-                      <CardContent className="p-4">
-                        <div className="min-w-0 text-center">
-                          <p className="text-2xl font-bold leading-tight text-chart-5" style={{ textShadow: "0 0 10px oklch(var(--color-chart-5)/0.5)" }}>{analysisResult.summary.medium}</p>
-                          <p className="mt-2 text-[11px] uppercase tracking-wide text-chart-5/80 font-mono">Medium</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
-                  <motion.div whileHover={{ y: -5 }} transition={{ type: "spring", stiffness: 300 }}>
-                    <Card className="bg-chart-3/10 border-chart-3/30 border shadow-[0_0_15px_oklch(var(--color-chart-3)/0.15)]">
-                      <CardContent className="p-4">
-                        <div className="min-w-0 text-center">
-                          <p className="text-2xl font-bold leading-tight text-chart-3" style={{ textShadow: "0 0 10px oklch(var(--color-chart-3)/0.5)" }}>{analysisResult.summary.low}</p>
-                          <p className="mt-2 text-[11px] uppercase tracking-wide text-chart-3/80 font-mono">Low</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </motion.div>
+                  ))}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -1202,19 +1334,19 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   <Card className="glass-panel border-0">
                     <CardContent className="min-w-0 p-4">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Templates Generated</p>
-                      <p className="mt-1 font-mono text-lg font-semibold leading-tight text-chart-1 break-words">{templatesGenerated}</p>
+                      <p className="mt-1 font-mono text-lg font-semibold leading-tight text-foreground break-words">{templatesGenerated}</p>
                     </CardContent>
                   </Card>
                   <Card className="glass-panel border-0">
                     <CardContent className="min-w-0 p-4">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">ML Anomalies</p>
-                      <p className="mt-1 font-mono text-lg font-semibold leading-tight text-chart-4 break-words">{mlAnomalyCount}</p>
+                      <p className="mt-1 font-mono text-lg font-semibold leading-tight text-foreground break-words">{mlAnomalyCount}</p>
                     </CardContent>
                   </Card>
                   <Card className="glass-panel border-0">
                     <CardContent className="min-w-0 p-4">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">ML Service</p>
-                      <p className={`mt-1 font-mono text-sm font-semibold capitalize leading-tight break-words ${mlServiceStatus === "available" ? "text-chart-3" : "text-destructive"}`}>
+                      <p className={`mt-1 font-mono text-sm font-semibold capitalize leading-tight break-words ${mlServiceStatus === "available" ? "text-foreground" : "text-destructive"}`}>
                         {mlServiceStatus}
                       </p>
                     </CardContent>
@@ -1222,7 +1354,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   <Card className="glass-panel border-0">
                     <CardContent className="min-w-0 p-4">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Correlations</p>
-                      <p className="mt-1 font-mono text-lg font-semibold leading-tight text-destructive break-words">
+                      <p className="mt-1 font-mono text-lg font-semibold leading-tight text-foreground break-words">
                         {ruleSummary?.correlatedAlerts ?? 0}
                       </p>
                     </CardContent>
@@ -1237,8 +1369,8 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
 
                 {mlServiceError && (
                   <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-                    <Alert className="border-chart-4/40 bg-chart-4/10 backdrop-blur-md">
-                      <AlertTitle className="text-chart-4 font-semibold">ML Service Fallback Active</AlertTitle>
+                    <Alert className="border-border bg-muted/30 backdrop-blur-md">
+                      <AlertTitle className="text-foreground font-semibold">ML Service Fallback Active</AlertTitle>
                       <AlertDescription className="text-foreground/80 text-sm">
                         Rule-based analysis completed, but the ML service was unavailable: {mlServiceError}
                       </AlertDescription>
@@ -1248,8 +1380,8 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
 
                 {privacy && (
                   <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-                    <Alert className="border-chart-3/40 bg-chart-3/10 backdrop-blur-md">
-                      <AlertTitle className="text-chart-3 font-semibold">Privacy Guard</AlertTitle>
+                    <Alert className="border-border bg-muted/30 backdrop-blur-md">
+                      <AlertTitle className="text-foreground font-semibold">Privacy Guard</AlertTitle>
                       <AlertDescription className="text-foreground/80 text-sm">
                         AI/ML input sanitized: IPs {privacy.replacements.ipAddresses}, users {privacy.replacements.usernames}, emails {privacy.replacements.emails}, hosts {privacy.replacements.hostnames}
                       </AlertDescription>
@@ -1259,32 +1391,14 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
 
                 {latestEvaluation && (
                   <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}>
-                    <Alert className="border-primary/40 bg-primary/10 backdrop-blur-md">
-                      <AlertTitle className="text-primary font-semibold">Latest Evaluation</AlertTitle>
-                      <AlertDescription className="text-foreground/80 text-sm">
-                        Samples: {String(latestEvaluation.sampleCount ?? "n/a")} | Templates: {String(latestEvaluation.templateCount ?? "n/a")} | Anomaly rate: {typeof latestEvaluation.anomalyRate === "number" ? latestEvaluation.anomalyRate.toFixed(4) : "n/a"}
-                        {latestEvaluation.confusionMatrix && (
-                          <>
-                            {" | Accuracy: "}{formatRatio(latestEvaluation.confusionMatrix.accuracy)}
-                            {" | Precision: "}{formatRatio(latestEvaluation.confusionMatrix.precision)}
-                            {" | Recall: "}{formatRatio(latestEvaluation.confusionMatrix.recall)}
-                            {" | F1: "}{formatRatio(latestEvaluation.confusionMatrix.f1Score)}
-                          </>
-                        )}
-                        {typeof latestEvaluation.multiclassAccuracy === "number" && (
-                          <>
-                            {" | Class accuracy: "}{formatRatio(latestEvaluation.multiclassAccuracy)}
-                          </>
-                        )}
-                      </AlertDescription>
-                    </Alert>
+                    <EvaluationReport metrics={latestEvaluation} />
                   </motion.div>
                 )}
 
                 <Card className="glass-panel border-0">
                   <CardHeader className="bg-card/40 border-b border-border/50 pb-4">
                     <CardTitle className="text-foreground flex items-center gap-2">
-                      <BarChart3 className="h-5 w-5 text-chart-1" />
+                      <BarChart3 className="h-5 w-5 text-muted-foreground" />
                       Structured Parsing Output
                     </CardTitle>
                     <CardDescription className="text-muted-foreground">
@@ -1310,15 +1424,15 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                                   Line {entry.lineNumber}
                                 </Badge>
                                 {entry.detector && (
-                                  <Badge variant="outline" className="border-primary/50 text-primary bg-primary/5">
+                                  <Badge variant="outline" className="border-border bg-background/50 text-foreground">
                                     {entry.detector}
                                   </Badge>
                                 )}
                                 {entry.anomalyFlag && (
-                                  <Badge className="bg-chart-4 text-chart-4-foreground shadow-[0_0_10px_oklch(var(--color-chart-4)/0.3)]">Anomaly</Badge>
+                                  <Badge variant="outline" className="border-border bg-muted/50 text-foreground">Anomaly</Badge>
                                 )}
                                 {typeof entry.anomalyScore === "number" && (
-                                  <span className="text-primary font-mono bg-primary/10 px-2 py-0.5 rounded">Score: {entry.anomalyScore.toFixed(4)}</span>
+                                  <span className="font-mono text-foreground bg-background/60 px-2 py-0.5 rounded border border-border">Score: {entry.anomalyScore.toFixed(4)}</span>
                                 )}
                                 {entry.templateId && <span className="font-mono bg-secondary px-2 py-0.5 rounded">TID: {entry.templateId}</span>}
                               </div>
@@ -1346,7 +1460,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   <CardHeader className="bg-card/40 border-b border-border/50 pb-4">
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-foreground flex items-center gap-2">
-                        <AlertTriangle className="h-5 w-5 text-destructive glow-text" />
+                        <AlertTriangle className="h-5 w-5 text-muted-foreground" />
                         Detected Suspicious Activities
                       </CardTitle>
                       <div className="flex items-center gap-2">
@@ -1356,9 +1470,9 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                           size="sm"
                           onClick={handleExport}
                           disabled={isExporting}
-                          className="border-border bg-secondary/30 text-foreground transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+                          className="border-border bg-secondary/30 text-foreground transition-all hover:border-border hover:bg-muted/40"
                         >
-                          <Download className="h-4 w-4 mr-1 text-primary" />
+                          <Download className="h-4 w-4 mr-1 text-muted-foreground" />
                           {isExporting ? "Exporting..." : "Export"}
                         </Button>
                       </div>
@@ -1368,7 +1482,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                     <ScrollArea className="h-[500px] p-4">
                       {analysisResult.logFile.activities.length === 0 ? (
                         <div className="text-center py-12">
-                          <CheckCircle className="h-16 w-16 mx-auto text-chart-3 mb-4 drop-shadow-[0_0_15px_oklch(var(--color-chart-3)/0.3)]" />
+                          <CheckCircle className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
                           <p className="text-foreground text-lg font-medium">No suspicious activities detected</p>
                           <p className="text-sm text-muted-foreground mt-2">This log file appears to be clean</p>
                         </div>
@@ -1402,13 +1516,13 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                        <Badge className={`shadow-sm ${getSeverityColor(activity.severity)}`}>
+                                        <Badge className={getSeverityColor(activity.severity)}>
                                           {activity.severity.toUpperCase()}
                                         </Badge>
                                         <Badge variant="outline" className="border-border bg-background/50 text-foreground font-mono text-[10px] uppercase">
                                           {activity.activityType.replace(/_/g, " ")}
                                         </Badge>
-                                        <Badge variant="outline" className="border-primary/30 text-primary bg-primary/5 font-mono text-[10px] uppercase">
+                                        <Badge variant="outline" className="border-border bg-background/50 text-foreground font-mono text-[10px] uppercase">
                                           {detector}
                                         </Badge>
                                         <span className="text-xs text-muted-foreground font-mono bg-secondary/50 px-2 py-0.5 rounded-full">
@@ -1419,24 +1533,24 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                                       <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap font-mono bg-background/30 p-2 rounded-lg border border-border/30">
                                         {activity.timestamp && (
                                           <span className="flex items-center gap-1.5">
-                                            <Clock className="h-3 w-3 text-primary" />
+                                            <Clock className="h-3 w-3 text-muted-foreground" />
                                             {activity.timestamp}
                                           </span>
                                         )}
                                         {activity.sourceIp && (
                                           <span className="flex items-center gap-1.5">
-                                            <Globe className="h-3 w-3 text-chart-2" />
+                                            <Globe className="h-3 w-3 text-muted-foreground" />
                                             {activity.sourceIp}
                                           </span>
                                         )}
                                         {activity.username && (
                                           <span className="flex items-center gap-1.5">
-                                            <User className="h-3 w-3 text-chart-4" />
+                                            <User className="h-3 w-3 text-muted-foreground" />
                                             {activity.username}
                                           </span>
                                         )}
                                         {Number.isFinite(anomalyScore) && (
-                                          <span className="text-chart-1 font-bold">
+                                          <span className="font-semibold text-foreground">
                                             Score: {(anomalyScore as number).toFixed(4)}
                                           </span>
                                         )}
@@ -1450,9 +1564,9 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                                         </p>
                                       )}
                                       <details className="mt-4 group">
-                                        <summary className="text-xs text-primary font-medium cursor-pointer hover:text-primary/80 transition-colors focus:outline-none list-none flex items-center gap-1">
-                                          <span className="group-open:hidden">▶ View raw log</span>
-                                          <span className="hidden group-open:inline">▼ Hide raw log</span>
+                                        <summary className="text-xs text-muted-foreground font-medium cursor-pointer hover:text-foreground transition-colors focus:outline-none list-none flex items-center gap-1">
+                                          <span className="group-open:hidden">View raw log</span>
+                                          <span className="hidden group-open:inline">Hide raw log</span>
                                         </summary>
                                         <pre className="mt-3 p-3 bg-[#0a0a0c] border border-border/50 rounded-lg text-[11px] text-muted-foreground overflow-x-auto font-mono shadow-inner">
                                           {activity.rawLog}
@@ -1478,39 +1592,36 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                 transition={{ duration: 0.5 }}
                 className="h-full"
               >
-                <Card className="glass-panel border-0 h-full min-h-[600px] flex items-center justify-center glow-border relative overflow-hidden">
-                  {/* Subtle background glow in empty state */}
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-primary/5 blur-[80px] rounded-full pointer-events-none" />
-                  
+                <Card className="glass-panel border-0 h-full min-h-[600px] flex items-center justify-center relative overflow-hidden">
                   <CardContent className="text-center relative z-10 w-full max-w-2xl mx-auto">
                     <motion.div 
                       animate={{ y: [0, -10, 0] }} 
                       transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                      className="mx-auto w-28 h-28 rounded-full bg-secondary/50 flex items-center justify-center mb-8 border border-border shadow-[0_0_30px_oklch(var(--color-primary)/0.1)]"
+                      className="mx-auto w-28 h-28 rounded-full bg-secondary/50 flex items-center justify-center mb-8 border border-border"
                     >
-                      <BarChart3 className="h-12 w-12 text-primary/80" />
+                      <BarChart3 className="h-12 w-12 text-muted-foreground" />
                     </motion.div>
-                    <h3 className="text-3xl font-bold text-foreground mb-4 tracking-tight glow-text">No Analysis Yet</h3>
+                    <h3 className="text-3xl font-bold text-foreground mb-4 tracking-tight">No Analysis Yet</h3>
                     <p className="text-muted-foreground mb-10 max-w-lg mx-auto text-lg leading-relaxed">
                       Upload a log file, run one of the bundled demo incidents, or collect from configured server paths.
                       The system detects failed logins, brute force attempts, privilege escalation, and related anomalies
                       with a hybrid rules-plus-ML pipeline.
                     </p>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-medium">
-                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:border-primary/30 hover:bg-primary/10 transition-all hover:-translate-y-1">
-                        <User className="h-6 w-6 mx-auto mb-3 text-chart-1" />
+                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:bg-muted/30 transition-all">
+                        <User className="h-6 w-6 mx-auto mb-3 text-muted-foreground" />
                         <p className="text-foreground">Failed Logins</p>
                       </div>
-                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:border-primary/30 hover:bg-primary/10 transition-all hover:-translate-y-1">
-                        <Activity className="h-6 w-6 mx-auto mb-3 text-chart-4" />
+                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:bg-muted/30 transition-all">
+                        <Activity className="h-6 w-6 mx-auto mb-3 text-muted-foreground" />
                         <p className="text-foreground">Brute Force</p>
                       </div>
-                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:border-primary/30 hover:bg-primary/10 transition-all hover:-translate-y-1">
-                        <TrendingUp className="h-6 w-6 mx-auto mb-3 text-destructive" />
+                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:bg-muted/30 transition-all">
+                        <TrendingUp className="h-6 w-6 mx-auto mb-3 text-muted-foreground" />
                         <p className="text-foreground">Privilege Escalation</p>
                       </div>
-                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:border-primary/30 hover:bg-primary/10 transition-all hover:-translate-y-1">
-                        <AlertTriangle className="h-6 w-6 mx-auto mb-3 text-chart-3" />
+                      <div className="p-4 rounded-xl bg-card/40 border border-border hover:bg-muted/30 transition-all">
+                        <AlertTriangle className="h-6 w-6 mx-auto mb-3 text-muted-foreground" />
                         <p className="text-foreground">Anomalies</p>
                       </div>
                     </div>

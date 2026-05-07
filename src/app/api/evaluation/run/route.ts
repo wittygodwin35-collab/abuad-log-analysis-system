@@ -44,13 +44,16 @@ async function resolveEvaluationDatasetDir(datasetDir?: string): Promise<string>
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
+      datasetContent?: string;
       datasetDir?: string;
+      datasetName?: string;
       sampleMin?: number;
       sampleMax?: number;
       confusionMatrix?: ConfusionMatrixCounts;
     };
 
-    const datasetDir = await resolveEvaluationDatasetDir(body.datasetDir);
+    const datasetContent = typeof body.datasetContent === 'string' ? body.datasetContent : undefined;
+    const datasetDir = datasetContent ? body.datasetName || 'uploaded-dataset' : await resolveEvaluationDatasetDir(body.datasetDir);
     if (!datasetDir) {
       return NextResponse.json(
         {
@@ -65,6 +68,7 @@ export async function POST(request: NextRequest) {
     const sampleMax = body.sampleMax ?? 500;
 
     const mlResult = await runMlEvaluation({
+      datasetContent,
       datasetDir,
       sampleMin,
       sampleMax,
@@ -91,11 +95,13 @@ export async function POST(request: NextRequest) {
     }
 
     const ruleMetrics = await buildRuleHitMetrics({
+      datasetContent,
       datasetDir,
       sampleMin,
       sampleMax,
     });
     const labelledMetrics = await buildLabelledEvaluationMetrics({
+      datasetContent,
       datasetDir,
     });
     const manualConfusionMatrix = body.confusionMatrix
@@ -110,8 +116,12 @@ export async function POST(request: NextRequest) {
         ? {
             classConfusionMatrix: labelledMetrics.classConfusionMatrix,
             classLabels: labelledMetrics.classLabels,
+            classificationReport: labelledMetrics.classificationReport,
+            confidenceCurve: labelledMetrics.confidenceCurve,
             labelledSampleCount: labelledMetrics.labelledSampleCount,
             multiclassAccuracy: labelledMetrics.multiclassAccuracy,
+            precisionRecallCurve: labelledMetrics.precisionRecallCurve,
+            rocCurve: labelledMetrics.rocCurve,
             thresholds: labelledMetrics.thresholds,
           }
         : {}),
