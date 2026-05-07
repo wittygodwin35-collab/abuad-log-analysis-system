@@ -61,6 +61,7 @@ const ANALYSIS_THRESHOLDS = {
 };
 
 const IPV4 = String.raw`\d{1,3}(?:\.\d{1,3}){3}`;
+const REMOTE_HOST = String.raw`[A-Za-z0-9_.:-]+`;
 
 const LOG_PATTERNS = {
   authLog: {
@@ -78,7 +79,7 @@ const LOG_PATTERNS = {
     sshConnection: /sshd\[\d+\]:\s+(.+)/i,
     invalidUser: new RegExp(String.raw`Invalid user (\S+) from (${IPV4})`, 'i'),
     authenticationFailure: new RegExp(
-      String.raw`authentication failure.*(?:rhost=|from\s+)(${IPV4}).*(?:user=|for\s+)(\S+)`,
+      String.raw`authentication failure.*(?:rhost=|from\s+)(${REMOTE_HOST})(?:.*?(?:user=|for\s+)(\S+))?`,
       'i',
     ),
   },
@@ -115,6 +116,10 @@ const LOG_PATTERNS = {
 const SUSPICIOUS_IPS = new Set([
   '192.168.1.100',
 ]);
+
+export function getAnalysisThresholds(): typeof ANALYSIS_THRESHOLDS {
+  return { ...ANALYSIS_THRESHOLDS };
+}
 
 const MONTHS: Record<string, number> = {
   jan: 0,
@@ -308,18 +313,19 @@ function normalizeAuthLine(line: string, lineNumber: number): NormalizedLogEntry
 
   const authFailure = line.match(LOG_PATTERNS.authLog.authenticationFailure);
   if (authFailure) {
+    const username = authFailure[2] || 'unknown';
     return {
       lineNumber,
       logType: 'auth',
       timestamp: timestamp.timestamp,
       timestampMs: timestamp.ms,
       sourceIp: authFailure[1],
-      username: authFailure[2],
+      username,
       eventType: 'LOGIN_FAILURE',
-      message: `Authentication failure for ${authFailure[2]}`,
+      message: `Authentication failure for ${username}`,
       raw: line,
       metadata: {
-        unknownUser: 'false',
+        unknownUser: String(username === 'unknown' || /user unknown/i.test(line)),
         authOutcome: 'failed',
       },
     };

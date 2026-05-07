@@ -79,6 +79,60 @@ function buildBundledEvaluationDatasetFiles(): DemoDatasetFile[] {
   const authLines: string[] = [];
   const webLines: string[] = [];
   const mixedLines: string[] = [];
+  const labelledTruthRows: Array<{ label: string; line: string }> = [
+    {
+      label: "safe",
+      line: '10.0.0.12 - analyst [15/Jan/2025:08:00:00 +0000] "GET /dashboard HTTP/1.1" 200 1402 "-" "Mozilla/5.0"',
+    },
+    {
+      label: "safe",
+      line: "Jan 15 08:00:01 server sshd[21001]: Accepted password for analyst from 10.0.0.12 port 54120 ssh2",
+    },
+    {
+      label: "safe",
+      line: "Jan 15 08:00:02 server systemd[1]: Started Session 42 of user analyst.",
+    },
+    {
+      label: "safe",
+      line: "Jan 15 08:00:03 server sshd[21002]: Failed password for analyst from 10.0.0.12 port 54122 ssh2",
+    },
+    {
+      label: "brute_force",
+      line: "Jan 15 08:01:00 server sshd[22001]: Failed password for invalid user admin from 192.168.1.50 port 40100 ssh2",
+    },
+    {
+      label: "brute_force",
+      line: "Jan 15 08:01:08 server sshd[22002]: Failed password for invalid user root from 192.168.1.50 port 40101 ssh2",
+    },
+    {
+      label: "brute_force",
+      line: "Jan 15 08:01:16 server sshd[22003]: Failed password for invalid user oracle from 192.168.1.50 port 40102 ssh2",
+    },
+    {
+      label: "brute_force",
+      line: "Jan 15 08:01:24 server sshd[22004]: Failed password for invalid user test from 192.168.1.50 port 40103 ssh2",
+    },
+    {
+      label: "brute_force",
+      line: "Jan 15 08:01:32 server sshd[22005]: Failed password for invalid user postgres from 192.168.1.50 port 40104 ssh2",
+    },
+    {
+      label: "sql_injection",
+      line: '198.51.100.77 - - [15/Jan/2025:08:02:00 +0000] "GET /api/users?select=*%20FROM%20users-- HTTP/1.1" 400 64 "-" "Mozilla/5.0"',
+    },
+    {
+      label: "sql_injection",
+      line: '198.51.100.77 - - [15/Jan/2025:08:02:05 +0000] "GET /search?q=%27%20OR%201=1-- HTTP/1.1" 400 92 "-" "Mozilla/5.0"',
+    },
+    {
+      label: "path_traversal",
+      line: '203.0.113.42 - - [15/Jan/2025:08:03:00 +0000] "GET /../../../../etc/passwd HTTP/1.1" 403 512 "-" "Mozilla/5.0"',
+    },
+    {
+      label: "path_traversal",
+      line: '203.0.113.42 - - [15/Jan/2025:08:03:04 +0000] "GET /static/%2e%2e/%2e%2e/etc/passwd HTTP/1.1" 403 512 "-" "Mozilla/5.0"',
+    },
+  ];
 
   for (let index = 0; index < 80; index += 1) {
     const minute = String(Math.floor(index / 60)).padStart(2, "0");
@@ -119,6 +173,10 @@ function buildBundledEvaluationDatasetFiles(): DemoDatasetFile[] {
     {
       relativePath: "mixed/mixed-eval.log",
       content: mixedLines.join("\n"),
+    },
+    {
+      relativePath: "labelled/chapter-3-truth.labels.jsonl",
+      content: labelledTruthRows.map((row) => JSON.stringify(row)).join("\n"),
     },
   ];
 }

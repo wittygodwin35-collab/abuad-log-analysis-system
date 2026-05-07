@@ -79,6 +79,11 @@ export interface EvaluationMetrics {
   scoreQuantiles: Record<string, number | null>;
   ruleHitCounts?: Record<string, number>;
   ruleSampleCount?: number;
+  labelledSampleCount?: number;
+  classConfusionMatrix?: Record<string, Record<string, number>>;
+  classLabels?: string[];
+  multiclassAccuracy?: number;
+  thresholds?: Record<string, number>;
   confusionMatrix?: {
     truePositive: number;
     falsePositive: number;

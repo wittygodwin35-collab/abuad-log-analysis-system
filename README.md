@@ -106,7 +106,7 @@ python -m uvicorn app:app --host 127.0.0.1 --port 8001
 You do not need your own log file to get started.
 
 1. Sign in on `/login`.
-2. Use one of the bundled demo incidents from the upload panel if you do not have a real log file yet.
+2. Download the real Loghub Linux sample from the upload panel when you want to test the file-upload flow with open-access log data.
 3. Or upload a `.log`, `.txt`, or `.json` file for analysis.
 4. Review the alert summary, parsed entries, and suspicious activity timeline.
 5. Use `Export` to download the current analysis as a real JSON file.
@@ -116,6 +116,10 @@ The dashboard also supports:
 - Collector runs against configured server log paths.
 - Model training using the bundled normal-log dataset or a custom directory.
 - Evaluation using the bundled evaluation dataset or a custom directory.
+
+## Open-Access Upload Sample
+
+The upload panel links to `public/sample-logs/loghub-linux-2k.log`, a real Linux system log sample from Loghub. Loghub describes its datasets as freely available for research or academic work and asks users to cite the Loghub paper where applicable. See `public/sample-logs/README.md` for the source URL and access note.
 
 ## ML Service Notes
 
@@ -133,7 +137,16 @@ The evaluation endpoint expects a dataset directory containing `.log`, `.txt`, o
 - Isolation Forest anomaly count and anomaly rate.
 - Score quantiles.
 - Rule-hit counts by suspicious activity type.
-- Optional accuracy, precision, recall, and F1 when truth-table counts are supplied.
+- Accuracy, precision, recall, and F1 when labelled truth-table records are present.
+- Class-level confusion counts for safe traffic, brute force, SQL injection, path traversal, and any other labels in the truth table.
+
+Labelled truth-table files should end in `.labels.jsonl` or `.truth.jsonl` and contain one JSON object per line:
+
+```json
+{"label":"brute_force","line":"Jan 15 08:01:00 server sshd[22001]: Failed password for invalid user admin from 192.168.1.50 port 40100 ssh2"}
+```
+
+The bundled evaluation dataset includes `labelled/chapter-3-truth.labels.jsonl`, which implements the chapter-three truth-table checks automatically. You can still supply manual TP/FP/FN/TN counts when needed:
 
 Example confusion-matrix payload:
 

@@ -25,6 +25,23 @@ describe('rule-based log analysis', () => {
     expect(types).toContain('multi_step_attack');
   });
 
+  it('recognizes real Loghub Linux pam_unix authentication failures', () => {
+    const result = analyzeLogContent(
+      [
+        'Jun 15 02:04:59 combo sshd(pam_unix)[20882]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=220-135-151-1.hinet-ip.hinet.net  user=root',
+        'Jun 15 02:04:59 combo sshd(pam_unix)[20884]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=220-135-151-1.hinet-ip.hinet.net  user=root',
+        'Jun 15 02:04:59 combo sshd(pam_unix)[20883]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=220-135-151-1.hinet-ip.hinet.net  user=root',
+        'Jun 15 02:04:59 combo sshd(pam_unix)[20885]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=220-135-151-1.hinet-ip.hinet.net  user=root',
+        'Jun 15 02:04:59 combo sshd(pam_unix)[20886]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=220-135-151-1.hinet-ip.hinet.net  user=root',
+      ].join('\n'),
+    );
+    const types = result.activities.map((activity) => activity.activityType);
+
+    expect(result.logType).toBe('auth');
+    expect(types).toContain('failed_login');
+    expect(types).toContain('brute_force');
+  });
+
   it('sanitizes identifiers before AI or ML handoff', () => {
     const sanitized = sanitizeLogContentForAi(
       'Jan 15 08:23:45 server sshd[1]: Failed password for invalid user admin from 192.168.1.50 port 22',

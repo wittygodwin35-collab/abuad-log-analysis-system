@@ -8,6 +8,7 @@ import {
 } from '@/lib/demo-data';
 import { runMlEvaluation } from '@/lib/ml-service';
 import {
+  buildLabelledEvaluationMetrics,
   buildRuleHitMetrics,
   calculateConfusionMatrixMetrics,
   type ConfusionMatrixCounts,
@@ -94,13 +95,28 @@ export async function POST(request: NextRequest) {
       sampleMin,
       sampleMax,
     });
+    const labelledMetrics = await buildLabelledEvaluationMetrics({
+      datasetDir,
+    });
+    const manualConfusionMatrix = body.confusionMatrix
+      ? calculateConfusionMatrixMetrics(body.confusionMatrix)
+      : null;
 
     const mergedMetrics = {
       ...(mlResult.data.metrics || {}),
       ruleHitCounts: ruleMetrics.ruleHitCounts,
       ruleSampleCount: ruleMetrics.sampleCount,
-      ...(body.confusionMatrix
-        ? { confusionMatrix: calculateConfusionMatrixMetrics(body.confusionMatrix) }
+      ...(labelledMetrics
+        ? {
+            classConfusionMatrix: labelledMetrics.classConfusionMatrix,
+            classLabels: labelledMetrics.classLabels,
+            labelledSampleCount: labelledMetrics.labelledSampleCount,
+            multiclassAccuracy: labelledMetrics.multiclassAccuracy,
+            thresholds: labelledMetrics.thresholds,
+          }
+        : {}),
+      ...(manualConfusionMatrix || labelledMetrics?.confusionMatrix
+        ? { confusionMatrix: manualConfusionMatrix || labelledMetrics?.confusionMatrix }
         : {}),
     };
 

@@ -99,7 +99,7 @@ interface ApiErrorPayload {
 
 const DEFAULT_EVALUATION_DATASET_DIR = "examples/evaluation-dataset";
 const DEFAULT_NORMAL_LOG_DIR = "examples/normal-training-dataset";
-const SAMPLE_UPLOAD_LOG_PATH = "/sample-logs/abuad-upload-sample.log";
+const SAMPLE_UPLOAD_LOG_PATH = "/sample-logs/loghub-linux-2k.log";
 
 export type DashboardPage = "dashboard" | "upload" | "pipeline" | "logs" | "results";
 
@@ -144,6 +144,10 @@ function parsePipelineMetadata(value: string | null): PipelineMetadata | null {
   } catch {
     return null;
   }
+}
+
+function formatRatio(value: number | null | undefined): string {
+  return typeof value === "number" ? value.toFixed(3) : "n/a";
 }
 
 export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
@@ -795,9 +799,12 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                 >
                   <a href={SAMPLE_UPLOAD_LOG_PATH} download>
                     <Download className="h-4 w-4" />
-                    Download sample upload log
+                    Download real Loghub Linux log
                   </a>
                 </Button>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  Open-access Linux system log from Loghub, suitable for testing the upload flow with real auth events.
+                </p>
                 <div className="mt-5 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs uppercase tracking-widest text-muted-foreground">Try A Demo Log</p>
@@ -854,7 +861,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   Pipeline Controls
                 </CardTitle>
                 <CardDescription className="text-muted-foreground">
-                  Train the Python model, run the collector, and execute evaluation jobs.
+                  Train the anomaly model, run the collector, and execute evaluation jobs.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 pt-6">
@@ -974,6 +981,16 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                         <p className="text-sm text-foreground">
                           Samples: {String(latestEvaluation.sampleCount ?? latestEvaluation.ruleSampleCount ?? "n/a")} | Templates: {String(latestEvaluation.templateCount ?? "n/a")} | Anomaly rate: {typeof latestEvaluation.anomalyRate === "number" ? latestEvaluation.anomalyRate.toFixed(4) : "n/a"}
                         </p>
+                        {latestEvaluation.confusionMatrix && (
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            Labelled: {String(latestEvaluation.labelledSampleCount ?? "manual")} | Accuracy: {formatRatio(latestEvaluation.confusionMatrix.accuracy)} | Precision: {formatRatio(latestEvaluation.confusionMatrix.precision)} | Recall: {formatRatio(latestEvaluation.confusionMatrix.recall)} | F1: {formatRatio(latestEvaluation.confusionMatrix.f1Score)}
+                          </p>
+                        )}
+                        {typeof latestEvaluation.multiclassAccuracy === "number" && (
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            Class accuracy: {formatRatio(latestEvaluation.multiclassAccuracy)} across {latestEvaluation.classLabels?.join(", ") || "truth-table labels"}.
+                          </p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1248,9 +1265,15 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                         Samples: {String(latestEvaluation.sampleCount ?? "n/a")} | Templates: {String(latestEvaluation.templateCount ?? "n/a")} | Anomaly rate: {typeof latestEvaluation.anomalyRate === "number" ? latestEvaluation.anomalyRate.toFixed(4) : "n/a"}
                         {latestEvaluation.confusionMatrix && (
                           <>
-                            {" | Precision: "}{latestEvaluation.confusionMatrix.precision.toFixed(3)}
-                            {" | Recall: "}{latestEvaluation.confusionMatrix.recall.toFixed(3)}
-                            {" | F1: "}{latestEvaluation.confusionMatrix.f1Score.toFixed(3)}
+                            {" | Accuracy: "}{formatRatio(latestEvaluation.confusionMatrix.accuracy)}
+                            {" | Precision: "}{formatRatio(latestEvaluation.confusionMatrix.precision)}
+                            {" | Recall: "}{formatRatio(latestEvaluation.confusionMatrix.recall)}
+                            {" | F1: "}{formatRatio(latestEvaluation.confusionMatrix.f1Score)}
+                          </>
+                        )}
+                        {typeof latestEvaluation.multiclassAccuracy === "number" && (
+                          <>
+                            {" | Class accuracy: "}{formatRatio(latestEvaluation.multiclassAccuracy)}
                           </>
                         )}
                       </AlertDescription>
