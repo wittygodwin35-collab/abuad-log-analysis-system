@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { DevToolsThemeBridge } from "@/components/dev-tools-theme-bridge";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Toaster } from "@/components/ui/sonner";
 
 const inter = Inter({
@@ -38,6 +39,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           {children}
+          <ThemeSwitcher />
           <DevToolsThemeBridge />
           <Toaster richColors position="top-right" />
         </ThemeProvider>
