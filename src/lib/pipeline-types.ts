@@ -39,6 +39,17 @@ export interface PipelineMetadata {
   mlServiceStatus: 'available' | 'unavailable';
   mlServiceError: string | null;
   templatesSummary: TemplateSummary[];
+  activityCount?: number;
+  activitySummary?: {
+    total: number;
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  activitiesTruncated?: boolean;
+  parsedEntryCount?: number;
+  parsedEntriesTruncated?: boolean;
   privacy?: {
     mode: 'sanitized';
     fieldsRedacted: string[];
@@ -57,6 +68,8 @@ export interface PipelineMetadata {
 }
 
 export interface CollectorStatus {
+  availabilityMessage: string | null;
+  available: boolean;
   lastRunAt: string | null;
   status: string;
   filesScanned: number;
@@ -79,6 +92,14 @@ export interface EvaluationMetrics {
   scoreQuantiles: Record<string, number | null>;
   ruleHitCounts?: Record<string, number>;
   ruleSampleCount?: number;
+  modelMeta?: {
+    bootstrapModel?: boolean;
+    contamination: number;
+    modelVersion: string;
+    normalLogDir: string;
+    trainedAt: string;
+    trainedSamples: number;
+  };
   labelledSampleCount?: number;
   classificationReport?: Array<{
     label: string;

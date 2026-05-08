@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from 'fs/promises';
 import { extname, join } from 'path';
 import { analyzeLogContent, getAnalysisThresholds, type SuspiciousActivity } from '@/lib/log-analyzer';
+import { resolveCompanionLabelsForDataset } from '@/lib/sample-dataset-labels';
 
 const SUPPORTED_EXTENSIONS = new Set(['.log', '.txt', '.json']);
 const LABEL_FILE_PATTERN = /\.(?:labels|truth)\.(?:jsonl|ndjson)$/i;
@@ -337,10 +338,10 @@ export async function collectLabelledEvaluationRecords(
 }
 
 function collectLabelledEvaluationRecordsFromContent(
-  datasetContent: string,
+  labelContent: string,
 ): LabelledEvaluationRecord[] {
   const records: LabelledEvaluationRecord[] = [];
-  for (const line of datasetContent.split(/\r?\n/)) {
+  for (const line of labelContent.split(/\r?\n/)) {
     try {
       const record = parseLabelRecord(line);
       if (record) {
@@ -351,6 +352,31 @@ function collectLabelledEvaluationRecordsFromContent(
     }
   }
   return records;
+}
+
+function mulberry32(seed: number): () => number {
+  return () => {
+    let next = (seed += 0x6d2b79f5);
+    next = Math.imul(next ^ (next >>> 15), next | 1);
+    next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+    return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function sampleWithSeed<T>(items: T[], maxItems?: number): T[] {
+  if (!maxItems || items.length <= maxItems) {
+    return items;
+  }
+
+  const copy = [...items];
+  const random = mulberry32(42);
+
+  for (let index = copy.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
+  }
+
+  return copy.slice(0, maxItems);
 }
 
 function buildClassificationReport(input: {
@@ -446,13 +472,32 @@ function buildThresholdCurveMetrics(input: {
 export async function buildLabelledEvaluationMetrics(input: {
   datasetContent?: string;
   datasetDir?: string;
+  datasetName?: string;
+  labelContent?: string;
+  sampleMax?: number;
 }): Promise<LabelledEvaluationMetrics | null> {
-  const records =
+  const directoryRecords = input.datasetDir
+    ? await collectLabelledEvaluationRecords(input.datasetDir)
+    : [];
+  const inlineLabelRecords =
+    typeof input.labelContent === 'string'
+      ? collectLabelledEvaluationRecordsFromContent(input.labelContent)
+      : [];
+  const companionRecords =
     typeof input.datasetContent === 'string'
-      ? collectLabelledEvaluationRecordsFromContent(input.datasetContent)
-      : input.datasetDir
-        ? await collectLabelledEvaluationRecords(input.datasetDir)
-        : [];
+      ? resolveCompanionLabelsForDataset({
+          datasetContent: input.datasetContent,
+          datasetName: input.datasetName,
+        }) || []
+      : [];
+  const records = sampleWithSeed(
+    inlineLabelRecords.length
+      ? inlineLabelRecords
+      : directoryRecords.length
+        ? directoryRecords
+        : companionRecords,
+    input.sampleMax,
+  );
   if (!records.length) {
     return null;
   }

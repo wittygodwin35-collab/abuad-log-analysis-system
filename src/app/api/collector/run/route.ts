@@ -1,10 +1,21 @@
 import { NextResponse } from 'next/server';
-import { runCollectorCycle } from '@/lib/collector';
+import { getCollectorSupportInfo, runCollectorCycle } from '@/lib/collector';
 
 export const runtime = 'nodejs';
 
 export async function POST() {
   try {
+    const support = getCollectorSupportInfo();
+    if (!support.available) {
+      return NextResponse.json(
+        {
+          error: 'Collector is unavailable in this deployment',
+          details: support.availabilityMessage,
+        },
+        { status: 409 },
+      );
+    }
+
     const result = await runCollectorCycle();
 
     return NextResponse.json({

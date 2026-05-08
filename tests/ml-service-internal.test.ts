@@ -71,4 +71,52 @@ describe.sequential('internal ML service', () => {
     expect(result.data?.metrics.sampleCount).toBe(8);
     expect(result.data?.metrics.templateCount).toBeGreaterThan(0);
   });
+
+  it('evaluates with the model produced by the latest real-time training request', async () => {
+    const { runMlEvaluation, trainMlModel } = await import('../src/lib/ml-service');
+    const linuxTrainingContent = Array.from({ length: 30 }, (_, index) => {
+      const second = String(index % 60).padStart(2, '0');
+      return `Jan 15 08:00:${second} server sshd[${21000 + index}]: Accepted password for analyst from 10.0.0.${10 + (index % 5)} port ${54000 + index} ssh2`;
+    }).join('\n');
+    const apacheTrainingContent = Array.from({ length: 30 }, (_, index) => {
+      const second = String(index % 60).padStart(2, '0');
+      return `10.0.0.${10 + (index % 5)} - - [15/Jan/2025:08:00:${second} +0000] "GET /dashboard HTTP/1.1" 200 ${1200 + index} "-" "Mozilla/5.0"`;
+    }).join('\n');
+    const evaluationContent = apacheTrainingContent;
+
+    const firstTraining = await trainMlModel({
+      normalLogContent: linuxTrainingContent,
+      normalLogDir: 'Linux_2k.log',
+    });
+    expect(firstTraining.data?.success).toBe(true);
+
+    const firstEvaluation = await runMlEvaluation({
+      datasetContent: evaluationContent,
+      datasetDir: 'Apache_2k.log',
+      sampleMax: 20,
+      sampleMin: 20,
+    });
+    expect(firstEvaluation.data?.metrics.modelMeta?.normalLogDir).toBe('Linux_2k.log');
+
+    const secondTraining = await trainMlModel({
+      normalLogContent: apacheTrainingContent,
+      normalLogDir: 'Apache_2k.log',
+    });
+    expect(secondTraining.data?.success).toBe(true);
+
+    const secondEvaluation = await runMlEvaluation({
+      datasetContent: evaluationContent,
+      datasetDir: 'Apache_2k.log',
+      sampleMax: 20,
+      sampleMin: 20,
+    });
+
+    expect(secondEvaluation.data?.metrics.modelMeta?.normalLogDir).toBe('Apache_2k.log');
+    expect(secondEvaluation.data?.metrics.modelMeta?.modelVersion).toBe(
+      secondTraining.data?.modelVersion,
+    );
+    expect(secondEvaluation.data?.metrics.modelMeta?.modelVersion).not.toBe(
+      firstEvaluation.data?.metrics.modelMeta?.modelVersion,
+    );
+  });
 });

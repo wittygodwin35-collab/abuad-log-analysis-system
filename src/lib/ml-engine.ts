@@ -48,6 +48,7 @@ interface PersistedFeatureEntry {
 }
 
 interface PersistedMlState {
+  bootstrapModel?: boolean;
   contamination: number;
   modelVersion: string;
   normalizedTrainingLines: string[];
@@ -63,6 +64,8 @@ interface MlRuntime {
   forest: IsolationForest;
   state: PersistedMlState;
 }
+
+type ModelMeta = NonNullable<EvaluationMetrics['modelMeta']>;
 
 interface WorkingTemplate {
   count: number;
@@ -487,6 +490,9 @@ async function trainRuntime(
   normalLogDir: string,
   maxSamples?: number,
   normalLogContent?: string,
+  options?: {
+    bootstrapModel?: boolean;
+  },
 ): Promise<PersistedMlState> {
   const lines =
     typeof normalLogContent === 'string'
@@ -519,8 +525,9 @@ async function trainRuntime(
   const trainedAt = new Date().toISOString();
 
   return {
+    bootstrapModel: Boolean(options?.bootstrapModel),
     contamination: DEFAULT_CONTAMINATION,
-    modelVersion: `iforest-js-${trainedAt.replace(/[-:.TZ]/g, '').slice(0, 14)}`,
+    modelVersion: `iforest-js-${trainedAt.replace(/[-:.TZ]/g, '').slice(0, 17)}`,
     normalizedTrainingLines,
     normalLogDir,
     threshold: buildThreshold(scores, DEFAULT_CONTAMINATION),
@@ -546,7 +553,9 @@ async function loadOrBootstrapRuntime(): Promise<MlRuntime | null> {
       }
 
       const bootstrapDir = await resolveBootstrapNormalLogDir();
-      const bootstrapState = await trainRuntime(bootstrapDir);
+      const bootstrapState = await trainRuntime(bootstrapDir, undefined, undefined, {
+        bootstrapModel: true,
+      });
       await persistRuntimeState(bootstrapState);
       return globalForMlRuntime.__abuadMlRuntime || buildRuntimeFromState(bootstrapState);
     })().finally(() => {
@@ -582,8 +591,9 @@ function sampleWithSeed(lines: string[], maxSamples: number): string[] {
   return copy.slice(0, maxSamples);
 }
 
-function buildModelMeta(state: PersistedMlState): Record<string, unknown> {
+function buildModelMeta(state: PersistedMlState): ModelMeta {
   return {
+    bootstrapModel: Boolean(state.bootstrapModel),
     contamination: state.contamination,
     modelVersion: state.modelVersion,
     normalLogDir: state.normalLogDir,
@@ -797,6 +807,7 @@ export async function runInternalMlEvaluation(payload: {
         max: sampleMax,
         min: sampleMin,
       },
+      modelMeta: runtime ? buildModelMeta(runtime.state) : undefined,
       scoreQuantiles: {
         p25: scores.length ? quantile(scores, 0.25) : null,
         p50: scores.length ? quantile(scores, 0.5) : null,

@@ -13,6 +13,28 @@ const DEFAULT_LOG_PATHS = [
   '/var/log/apache2/error.log',
 ];
 
+function isNetlifyRuntime(): boolean {
+  return Boolean(process.env.NETLIFY || process.env.CONTEXT || process.env.SITE_ID);
+}
+
+export function getCollectorSupportInfo(): {
+  available: boolean;
+  availabilityMessage: string | null;
+} {
+  if (isNetlifyRuntime()) {
+    return {
+      available: false,
+      availabilityMessage:
+        'Collector is disabled on hosted Netlify deployments because operating-system log paths are not readable there. Use the Loghub sample, upload a local log file, or self-host the app to collect from live server paths.',
+    };
+  }
+
+  return {
+    available: true,
+    availabilityMessage: null,
+  };
+}
+
 export function getConfiguredCollectorPaths(): string[] {
   const configured = process.env.LOG_COLLECTOR_PATHS;
   if (!configured) {
@@ -183,6 +205,8 @@ export async function runCollectorCycle(): Promise<CollectorRunResult> {
 }
 
 export async function getCollectorStatus(): Promise<{
+  availabilityMessage: string | null;
+  available: boolean;
   lastRunAt: string | null;
   status: string;
   filesScanned: number;
@@ -190,14 +214,17 @@ export async function getCollectorStatus(): Promise<{
   logFilesCreated: number;
   lastError: string | null;
 }> {
+  const support = getCollectorSupportInfo();
   const state = await db.collectorState.findUnique({
     where: { id: 'default' },
   });
 
   if (!state) {
     return {
+      availabilityMessage: support.availabilityMessage,
+      available: support.available,
       lastRunAt: null,
-      status: 'idle',
+      status: support.available ? 'idle' : 'disabled',
       filesScanned: 0,
       linesIngested: 0,
       logFilesCreated: 0,
@@ -206,8 +233,10 @@ export async function getCollectorStatus(): Promise<{
   }
 
   return {
+    availabilityMessage: support.availabilityMessage,
+    available: support.available,
     lastRunAt: state.lastRunAt ? state.lastRunAt.toISOString() : null,
-    status: state.status,
+    status: support.available ? state.status : 'disabled',
     filesScanned: state.filesScanned,
     linesIngested: state.linesIngested,
     logFilesCreated: state.logFilesCreated,

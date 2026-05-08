@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { fetchLogFileResponse } from '@/lib/analysis-storage';
 
 export const runtime = 'nodejs';
 
@@ -32,41 +33,18 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-
-    const logFile = await db.logFile.findUnique({
-      where: { id },
-      include: {
-        activities: {
-          orderBy: {
-            createdAt: 'desc',
-          },
-        },
-        parsedEntries: {
-          orderBy: {
-            lineNumber: 'asc',
-          },
-        },
-      },
-    });
-
-    if (!logFile) {
+    const response = await fetchLogFileResponse(id);
+    if (!response) {
       return NextResponse.json(
         { error: 'Log file not found' },
         { status: 404 }
       );
     }
 
-    const summary = {
-      total: logFile.activities.length,
-      critical: logFile.activities.filter((a) => a.severity === 'critical').length,
-      high: logFile.activities.filter((a) => a.severity === 'high').length,
-      medium: logFile.activities.filter((a) => a.severity === 'medium').length,
-      low: logFile.activities.filter((a) => a.severity === 'low').length,
-    };
-
     return NextResponse.json({
-      logFile,
-      summary,
+      logFile: response.logFile,
+      summary: response.summary,
+      pipeline: response.pipeline,
     });
   } catch (error) {
     console.error('Error fetching log file:', error);

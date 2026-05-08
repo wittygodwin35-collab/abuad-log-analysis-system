@@ -7,12 +7,14 @@ import {
   isBundledDatasetPath,
 } from '@/lib/demo-data';
 import { runMlEvaluation } from '@/lib/ml-service';
+import { readPublicSampleDatasetById } from '@/lib/sample-datasets.server';
 import {
   buildLabelledEvaluationMetrics,
   buildRuleHitMetrics,
   calculateConfusionMatrixMetrics,
   type ConfusionMatrixCounts,
 } from '@/lib/evaluation';
+import type { PublicSampleDatasetDefinition } from '@/lib/sample-datasets';
 
 export const runtime = 'nodejs';
 
@@ -47,13 +49,25 @@ export async function POST(request: NextRequest) {
       datasetContent?: string;
       datasetDir?: string;
       datasetName?: string;
+      sampleDatasetId?: PublicSampleDatasetDefinition['id'];
+      labelContent?: string;
       sampleMin?: number;
       sampleMax?: number;
       confusionMatrix?: ConfusionMatrixCounts;
     };
-
-    const datasetContent = typeof body.datasetContent === 'string' ? body.datasetContent : undefined;
-    const datasetDir = datasetContent ? body.datasetName || 'uploaded-dataset' : await resolveEvaluationDatasetDir(body.datasetDir);
+    const sampleDatasetId =
+      typeof body.sampleDatasetId === 'string' ? body.sampleDatasetId : undefined;
+    const sampleDataset = sampleDatasetId
+      ? await readPublicSampleDatasetById(sampleDatasetId)
+      : null;
+    const datasetContent =
+      typeof body.datasetContent === 'string'
+        ? body.datasetContent
+        : sampleDataset?.content;
+    const labelContent = typeof body.labelContent === 'string' ? body.labelContent : undefined;
+    const datasetDir = datasetContent
+      ? sampleDataset?.definition.filename || body.datasetName || 'uploaded-dataset'
+      : await resolveEvaluationDatasetDir(body.datasetDir);
     if (!datasetDir) {
       return NextResponse.json(
         {
@@ -103,6 +117,9 @@ export async function POST(request: NextRequest) {
     const labelledMetrics = await buildLabelledEvaluationMetrics({
       datasetContent,
       datasetDir,
+      datasetName: sampleDataset?.definition.filename || body.datasetName,
+      labelContent,
+      sampleMax,
     });
     const manualConfusionMatrix = body.confusionMatrix
       ? calculateConfusionMatrixMetrics(body.confusionMatrix)

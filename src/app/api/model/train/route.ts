@@ -6,6 +6,8 @@ import {
   isBundledDatasetPath,
 } from '@/lib/demo-data';
 import { trainMlModel } from '@/lib/ml-service';
+import { readPublicSampleDatasetById } from '@/lib/sample-datasets.server';
+import type { PublicSampleDatasetDefinition } from '@/lib/sample-datasets';
 
 export const runtime = 'nodejs';
 
@@ -38,17 +40,27 @@ export async function POST(request: NextRequest) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
       datasetName?: string;
+      sampleDatasetId?: PublicSampleDatasetDefinition['id'];
       normalLogDir?: string;
       normalLogContent?: string;
       maxSamples?: number;
     };
+    const sampleDatasetId =
+      typeof body.sampleDatasetId === 'string' ? body.sampleDatasetId : undefined;
+    const sampleDataset = sampleDatasetId
+      ? await readPublicSampleDatasetById(sampleDatasetId)
+      : null;
     const normalLogContent =
-      typeof body.normalLogContent === 'string' ? body.normalLogContent : undefined;
+      typeof body.normalLogContent === 'string'
+        ? body.normalLogContent
+        : sampleDataset?.content;
 
     const result = await trainMlModel({
       normalLogContent,
       normalLogDir: normalLogContent
-        ? body.datasetName || 'uploaded-training-dataset'
+        ? sampleDataset?.definition.filename ||
+          body.datasetName ||
+          'uploaded-training-dataset'
         : await resolveNormalLogDir(body.normalLogDir),
       maxSamples: body.maxSamples,
     });

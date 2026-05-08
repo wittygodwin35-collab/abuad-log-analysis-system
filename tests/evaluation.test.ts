@@ -7,6 +7,11 @@ import {
   buildRuleHitMetrics,
   calculateConfusionMatrixMetrics,
 } from '../src/lib/evaluation';
+import {
+  APACHE_SAMPLE_NAME,
+  LOGHUB_SAMPLE_NAME,
+  SECREPO_AUTH_SAMPLE_NAME,
+} from '../src/lib/sample-dataset-labels';
 
 let tempDir: string | null = null;
 
@@ -135,6 +140,104 @@ describe('evaluation metrics', () => {
 
     expect(metrics.sampleCount).toBe(3);
     expect(metrics.ruleHitCounts.failed_login).toBe(3);
+  });
+
+  it('builds labelled metrics from companion label content for uploads', async () => {
+    const datasetContent = [
+      'Jan 15 08:00:01 server sshd[21001]: Accepted password for analyst from 10.0.0.12 port 54120 ssh2',
+      'Jan 15 08:01:00 server sshd[22001]: Failed password for invalid user admin from 192.168.1.50 port 40100 ssh2',
+      'Jan 15 08:01:08 server sshd[22002]: Failed password for invalid user root from 192.168.1.50 port 40101 ssh2',
+    ].join('\n');
+    const labelContent = [
+      {
+        label: 'safe',
+        line: 'Jan 15 08:00:01 server sshd[21001]: Accepted password for analyst from 10.0.0.12 port 54120 ssh2',
+      },
+      {
+        label: 'brute_force',
+        line: 'Jan 15 08:01:00 server sshd[22001]: Failed password for invalid user admin from 192.168.1.50 port 40100 ssh2',
+      },
+      {
+        label: 'brute_force',
+        line: 'Jan 15 08:01:08 server sshd[22002]: Failed password for invalid user root from 192.168.1.50 port 40101 ssh2',
+      },
+    ]
+      .map((row) => JSON.stringify(row))
+      .join('\n');
+
+    const metrics = await buildLabelledEvaluationMetrics({
+      datasetContent,
+      labelContent,
+      sampleMax: 10,
+    });
+
+    expect(metrics?.labelledSampleCount).toBe(3);
+    expect(metrics?.confusionMatrix.truePositive).toBe(2);
+    expect(metrics?.confusionMatrix.trueNegative).toBe(1);
+    expect(metrics?.precisionRecallCurve.length).toBeGreaterThan(0);
+  });
+
+  it('builds curated labelled metrics for the bundled loghub sample path', async () => {
+    const metrics = await buildLabelledEvaluationMetrics({
+      datasetContent: [
+        'Jun 14 15:16:01 combo sshd(pam_unix)[19939]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4',
+        'Jun 14 15:16:02 combo sshd(pam_unix)[19939]: check pass; user unknown',
+        'Jun 14 15:16:03 combo sshd(pam_unix)[19940]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4',
+        'Jun 14 15:16:04 combo sshd(pam_unix)[19941]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4',
+        'Jun 14 15:16:05 combo sshd(pam_unix)[19942]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4',
+        'Jun 14 15:16:06 combo sshd(pam_unix)[19943]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4',
+        'Jun 14 15:16:07 combo sshd(pam_unix)[19944]: authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4',
+        'Jun 15 04:06:18 combo su(pam_unix)[21416]: session opened for user cyrus by (uid=0)',
+        'Jun 15 04:06:20 combo logrotate: ALERT exited abnormally with [1]',
+      ].join('\n'),
+      datasetName: LOGHUB_SAMPLE_NAME,
+      sampleMax: 20,
+    });
+
+    expect(metrics?.labelledSampleCount).toBe(9);
+    expect(metrics?.classificationReport?.some((row) => row.label === 'brute_force')).toBe(true);
+    expect(metrics?.classificationReport?.some((row) => row.label === 'safe')).toBe(true);
+    expect(metrics?.classificationReport?.some((row) => row.label === 'anomaly')).toBe(true);
+  });
+
+  it('builds curated labelled metrics for the Apache 2k sample path', async () => {
+    const metrics = await buildLabelledEvaluationMetrics({
+      datasetContent: [
+        '[Sun Dec 04 04:47:44 2005] [notice] workerEnv.init() ok /etc/httpd/conf/workers2.properties',
+        '[Sun Dec 04 04:47:44 2005] [error] mod_jk child workerEnv in error state 6',
+        '[Sun Dec 04 04:51:08 2005] [notice] jk2_init() Found child 6725 in scoreboard slot 10',
+        '[Sun Dec 04 04:52:19 2005] [warn] long lost child came home! (pid 6727)',
+      ].join('\n'),
+      datasetName: APACHE_SAMPLE_NAME,
+      sampleMax: 10,
+    });
+
+    expect(metrics?.labelledSampleCount).toBe(4);
+    expect(metrics?.classificationReport?.some((row) => row.label === 'safe')).toBe(true);
+    expect(metrics?.classificationReport?.some((row) => row.label === 'anomaly')).toBe(true);
+    expect(metrics?.confusionMatrix.truePositive).toBeGreaterThan(0);
+  });
+
+  it('builds curated labelled metrics for SecRepo auth logs', async () => {
+    const metrics = await buildLabelledEvaluationMetrics({
+      datasetContent: [
+        'Nov 30 08:42:04 ip-172-31-27-153 sshd[22182]: Invalid user admin from 187.12.249.74',
+        'Nov 30 08:42:04 ip-172-31-27-153 sshd[22182]: input_userauth_request: invalid user admin [preauth]',
+        'Nov 30 08:42:08 ip-172-31-27-153 sshd[22184]: Invalid user guest from 187.12.249.74',
+        'Nov 30 08:42:12 ip-172-31-27-153 sshd[22186]: Invalid user postgres from 187.12.249.74',
+        'Nov 30 08:42:16 ip-172-31-27-153 sshd[22188]: Invalid user test from 187.12.249.74',
+        'Nov 30 08:42:20 ip-172-31-27-153 sshd[22190]: Invalid user oracle from 187.12.249.74',
+        'Nov 30 09:17:01 ip-172-31-27-153 CRON[22125]: pam_unix(cron:session): session opened for user root by (uid=0)',
+      ].join('\n'),
+      datasetName: SECREPO_AUTH_SAMPLE_NAME,
+      sampleMax: 10,
+    });
+
+    expect(metrics?.labelledSampleCount).toBe(7);
+    expect(metrics?.classificationReport?.some((row) => row.label === 'brute_force')).toBe(true);
+    expect(metrics?.classificationReport?.some((row) => row.label === 'safe')).toBe(true);
+    expect(metrics?.confusionMatrix.truePositive).toBe(5);
+    expect(metrics?.confusionMatrix.trueNegative).toBe(2);
   });
 
   it('fails clearly when the requested sample minimum is not met', async () => {

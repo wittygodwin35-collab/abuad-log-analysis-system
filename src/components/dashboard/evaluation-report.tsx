@@ -5,6 +5,7 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -23,6 +24,14 @@ import {
 interface EvaluationReportProps {
   metrics: EvaluationMetrics;
 }
+
+const CHART_COLORS = {
+  baseline: "var(--muted-foreground)",
+  f1Score: "var(--chart-3)",
+  precision: "var(--chart-1)",
+  recall: "var(--chart-4)",
+  rocCurve: "var(--chart-5)",
+};
 
 function asPercent(value: number | null | undefined): string {
   return typeof value === "number" ? `${(value * 100).toFixed(1)}%` : "n/a";
@@ -58,18 +67,20 @@ function MetricTile({
 function CurveChart({
   data,
   lines,
+  showReferenceDiagonal = false,
   title,
   xKey,
 }: {
   data: Array<Record<string, number>>;
   lines: Array<{ dataKey: string; label: string; stroke: string }>;
+  showReferenceDiagonal?: boolean;
   title: string;
   xKey: string;
 }) {
   if (!data.length) {
     return (
       <div className="rounded-md border border-dashed border-border bg-background/35 p-4 text-sm text-muted-foreground">
-        Labelled confidence data is required for {title.toLowerCase()}.
+        Companion label records are required for {title.toLowerCase()}.
       </div>
     );
   }
@@ -102,6 +113,16 @@ function CurveChart({
             }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
+          {showReferenceDiagonal ? (
+            <ReferenceLine
+              segment={[
+                { x: 0, y: 0 },
+                { x: 1, y: 1 },
+              ]}
+              stroke={CHART_COLORS.baseline}
+              strokeDasharray="4 4"
+            />
+          ) : null}
           {lines.map((line) => (
             <Line
               key={line.dataKey}
@@ -124,6 +145,31 @@ export function EvaluationReport({ metrics }: EvaluationReportProps) {
   const confusion = metrics.confusionMatrix;
   const classLabels = metrics.classLabels || [];
   const matrix = metrics.classConfusionMatrix || {};
+  const modelMeta = metrics.modelMeta;
+  const ruleHitRows = Object.entries(metrics.ruleHitCounts || {}).sort((left, right) => {
+    if (right[1] !== left[1]) {
+      return right[1] - left[1];
+    }
+    return left[0].localeCompare(right[0]);
+  });
+  const metricTiles = [
+    {
+      label: "Sample Window",
+      value: String(metrics.sampleCount ?? metrics.ruleSampleCount ?? "n/a"),
+    },
+    ...(typeof metrics.labelledSampleCount === "number"
+      ? [
+          {
+            label: "Labelled Rows",
+            value: String(metrics.labelledSampleCount),
+          },
+        ]
+      : []),
+    { label: "Accuracy", value: asPercent(confusion?.accuracy) },
+    { label: "Precision", value: asPercent(confusion?.precision) },
+    { label: "Recall", value: asPercent(confusion?.recall) },
+    { label: "F1", value: asPercent(confusion?.f1Score) },
+  ];
   const maxMatrixValue = classLabels.reduce((max, actual) => {
     return Math.max(
       max,
@@ -136,17 +182,51 @@ export function EvaluationReport({ metrics }: EvaluationReportProps) {
       <div className="border-b border-border/60 bg-card/50 px-5 py-4">
         <h2 className="text-base font-semibold text-foreground">Evaluation Report</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Classification metrics and labelled evaluation curves for the current pipeline run.
+          Parsing, rule-hit counts, template clustering, and anomaly scoring are always shown. Classification metrics and confidence curves appear when companion labels are available.
         </p>
       </div>
       <div className="space-y-5 p-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <MetricTile label="Samples" value={String(metrics.sampleCount ?? metrics.ruleSampleCount ?? "n/a")} />
-          <MetricTile label="Accuracy" value={asPercent(confusion?.accuracy)} />
-          <MetricTile label="Precision" value={asPercent(confusion?.precision)} />
-          <MetricTile label="Recall" value={asPercent(confusion?.recall)} />
-          <MetricTile label="F1" value={asPercent(confusion?.f1Score)} />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          {metricTiles.map((tile) => (
+            <MetricTile key={tile.label} label={tile.label} value={tile.value} />
+          ))}
         </div>
+
+        {modelMeta ? (
+          <div className="rounded-md border border-border bg-background/35 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-foreground">Model Used For This Run</h3>
+              <span className="rounded border border-border bg-background/60 px-2 py-0.5 font-mono text-[11px] text-foreground">
+                {modelMeta.modelVersion}
+              </span>
+              {modelMeta.bootstrapModel ? (
+                <span className="rounded border border-border bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                  bootstrapped baseline
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Trained on {modelMeta.trainedSamples} baseline lines at {new Date(modelMeta.trainedAt).toLocaleString()} from
+              {" "}
+              <span className="font-mono text-[12px] text-foreground">{modelMeta.normalLogDir}</span>.
+            </p>
+          </div>
+        ) : null}
+
+        {ruleHitRows.length ? (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-foreground">Rule Detection Summary</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {ruleHitRows.map(([label, value]) => (
+                <MetricTile
+                  key={label}
+                  label={label.replace(/_/g, " ")}
+                  value={String(value)}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {metrics.classificationReport?.length ? (
           <div className="space-y-2">
@@ -176,7 +256,14 @@ export function EvaluationReport({ metrics }: EvaluationReportProps) {
           </div>
         ) : (
           <p className="rounded-md border border-dashed border-border bg-background/35 p-4 text-sm text-muted-foreground">
-            Classification report is available when the dataset includes labelled truth-table records.
+            This dataset ran through parsing, rule detection, template clustering, and anomaly scoring, but supervised metrics need companion label records such as
+            {" "}
+            <span className="font-mono">*.labels.jsonl</span>
+            {" "}
+            or
+            {" "}
+            <span className="font-mono">*.truth.jsonl</span>
+            .
           </p>
         )}
 
@@ -228,7 +315,7 @@ export function EvaluationReport({ metrics }: EvaluationReportProps) {
                 recall: point.recall,
                 threshold: point.threshold,
               }))}
-              lines={[{ dataKey: "precision", label: "Precision", stroke: "var(--foreground)" }]}
+              lines={[{ dataKey: "precision", label: "Precision", stroke: CHART_COLORS.precision }]}
               title="Precision-Recall Curve"
               xKey="recall"
             />
@@ -241,7 +328,8 @@ export function EvaluationReport({ metrics }: EvaluationReportProps) {
                 threshold: point.threshold,
                 truePositiveRate: point.truePositiveRate,
               }))}
-              lines={[{ dataKey: "truePositiveRate", label: "True positive rate", stroke: "var(--foreground)" }]}
+              lines={[{ dataKey: "truePositiveRate", label: "True positive rate", stroke: CHART_COLORS.rocCurve }]}
+              showReferenceDiagonal
               title="ROC Curve"
               xKey="falsePositiveRate"
             />
@@ -258,9 +346,9 @@ export function EvaluationReport({ metrics }: EvaluationReportProps) {
               threshold: point.threshold,
             }))}
             lines={[
-              { dataKey: "precision", label: "Precision", stroke: "var(--foreground)" },
-              { dataKey: "recall", label: "Recall", stroke: "var(--muted-foreground)" },
-              { dataKey: "f1Score", label: "F1", stroke: "var(--border)" },
+              { dataKey: "precision", label: "Precision", stroke: CHART_COLORS.precision },
+              { dataKey: "recall", label: "Recall", stroke: CHART_COLORS.recall },
+              { dataKey: "f1Score", label: "F1", stroke: CHART_COLORS.f1Score },
             ]}
             title="Precision, Recall, And F1 By Confidence"
             xKey="threshold"

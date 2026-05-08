@@ -35,6 +35,7 @@ function severityFromScore(score: number): SuspiciousActivity['severity'] {
 }
 
 function toMlActivity(anomaly: {
+  lineNumber?: number;
   timestamp?: string | null;
   source?: string | null;
   rawLine: string;
@@ -62,6 +63,18 @@ function toMlActivity(anomaly: {
       source: anomaly.source || '',
     },
   };
+}
+
+function restoreOriginalRawLine(input: {
+  fallback: string;
+  lineNumber?: number;
+  originalLines: string[];
+}): string {
+  if (!input.lineNumber) {
+    return input.fallback;
+  }
+
+  return input.originalLines[input.lineNumber - 1] || input.fallback;
 }
 
 export async function runHybridAnalysis(
@@ -100,14 +113,42 @@ export async function runHybridAnalysis(
     };
   }
 
+  const originalLines = content.split(/\r?\n/).filter((line) => line.trim());
+  const parsedEntries: ParsedEntry[] = mlResult.data.parsedEntries.map((entry) => {
+    const rawLine = restoreOriginalRawLine({
+      fallback: entry.rawLine,
+      lineNumber: entry.lineNumber,
+      originalLines,
+    });
+
+    if (rawLine === entry.rawLine) {
+      return entry;
+    }
+
+    return {
+      ...entry,
+      metadata: {
+        ...(entry.metadata || {}),
+        sanitizedRawLine: entry.rawLine,
+      },
+      rawLine,
+    };
+  });
   const mlActivities = mlResult.data.mlAnomalies.map((anomaly) =>
-    toMlActivity(anomaly),
+    toMlActivity({
+      ...anomaly,
+      rawLine: restoreOriginalRawLine({
+        fallback: anomaly.rawLine,
+        lineNumber: anomaly.lineNumber,
+        originalLines,
+      }),
+    }),
   );
 
   return {
     logType: ruleResult.logType,
     mergedActivities: [...ruleResult.activities, ...mlActivities],
-    parsedEntries: mlResult.data.parsedEntries,
+    parsedEntries,
     templatesSummary: mlResult.data.templatesSummary,
     mlAnomalyCount: mlActivities.length,
     mlServiceStatus: 'available',

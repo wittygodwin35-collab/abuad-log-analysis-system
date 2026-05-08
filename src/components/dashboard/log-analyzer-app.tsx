@@ -40,11 +40,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
-  CollectorStatus,
   EvaluationMetrics,
   ParsedEntry,
   PipelineMetadata,
 } from "@/lib/pipeline-types";
+import {
+  getPublicSampleDataset,
+  PUBLIC_SAMPLE_DATASETS,
+  type PublicSampleDatasetDefinition,
+} from "@/lib/sample-datasets";
 
 // Types
 interface SuspiciousActivity {
@@ -70,7 +74,11 @@ interface LogFile {
   status: string;
   pipelineMetadata: string | null;
   createdAt: string;
+  activityCount?: number;
+  activitiesTruncated?: boolean;
   activities: SuspiciousActivity[];
+  parsedEntryCount?: number;
+  parsedEntriesTruncated?: boolean;
   parsedEntries?: ParsedEntry[];
 }
 
@@ -106,15 +114,22 @@ interface ApiErrorPayload {
 }
 
 const DEFAULT_EVALUATION_DATASET_DIR = "examples/evaluation-dataset";
-const DEFAULT_NORMAL_LOG_DIR = "examples/normal-training-dataset";
-const SAMPLE_UPLOAD_LOG_PATH = "/sample-logs/loghub-linux-2k.log";
-const LOGHUB_SAMPLE_NAME = "loghub-linux-2k.log";
 
-type DatasetMode = "default" | "loghub" | "upload" | "path";
+type DatasetMode = PublicSampleDatasetDefinition["id"] | "upload" | "path";
 
 interface UploadedDataset {
   content: string;
   name: string;
+}
+
+interface SelectedDatasetPayload {
+  sampleDatasetId?: PublicSampleDatasetDefinition["id"];
+  datasetContent?: string;
+  datasetDir?: string;
+  datasetName?: string;
+  labelContent?: string;
+  normalLogContent?: string;
+  normalLogDir?: string;
 }
 
 export type DashboardPage = "dashboard" | "upload" | "pipeline" | "logs" | "results";
@@ -123,12 +138,11 @@ interface LogAnalyzerAppProps {
   activePage: DashboardPage;
 }
 
-interface CollectorRunResponse {
+interface TrainingRunResponse {
   success: boolean;
-  filesScanned: number;
-  linesIngested: number;
-  logFilesCreated: number;
-  errors?: string[];
+  trainedSamples: number;
+  modelVersion: string;
+  trainedAt: string;
 }
 
 const DASHBOARD_NAV_ITEMS: Array<{
@@ -169,16 +183,10 @@ async function readTextFile(file: File): Promise<UploadedDataset> {
   };
 }
 
-async function fetchBundledLoghubDataset(): Promise<UploadedDataset> {
-  const response = await fetch(SAMPLE_UPLOAD_LOG_PATH);
-  if (!response.ok) {
-    throw new Error("Unable to load the bundled Loghub sample.");
-  }
-
-  return {
-    content: await response.text(),
-    name: LOGHUB_SAMPLE_NAME,
-  };
+function isPublicSampleDatasetMode(
+  value: DatasetMode,
+): value is PublicSampleDatasetDefinition["id"] {
+  return value === "loghub-linux-2k" || value === "apache-error-2k" || value === "secrepo-auth-log";
 }
 
 export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
@@ -191,24 +199,22 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
   const [logFiles, setLogFiles] = useState<LogFile[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedLog, setSelectedLog] = useState<LogFile | null>(null);
-  const [collectorStatus, setCollectorStatus] = useState<CollectorStatus | null>(null);
   const [isTrainingModel, setIsTrainingModel] = useState(false);
-  const [isCollectorRunning, setIsCollectorRunning] = useState(false);
   const [isRunningEvaluation, setIsRunningEvaluation] = useState(false);
   const [latestEvaluation, setLatestEvaluation] = useState<EvaluationMetrics | null>(null);
   const [demoLogs, setDemoLogs] = useState<DemoLogSummary[]>([]);
   const [demoLoadingId, setDemoLoadingId] = useState<string | null>(null);
+  const [sampleDatasetLoadingId, setSampleDatasetLoadingId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [session, setSession] = useState<SessionState | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [trainingDatasetMode, setTrainingDatasetMode] = useState<DatasetMode>("default");
-  const [trainingDatasetDir, setTrainingDatasetDir] = useState(DEFAULT_NORMAL_LOG_DIR);
-  const [trainingUploadedDataset, setTrainingUploadedDataset] = useState<UploadedDataset | null>(null);
-  const [evaluationDatasetMode, setEvaluationDatasetMode] = useState<DatasetMode>("default");
-  const [evaluationDatasetDir, setEvaluationDatasetDir] = useState(DEFAULT_EVALUATION_DATASET_DIR);
-  const [evaluationUploadedDataset, setEvaluationUploadedDataset] = useState<UploadedDataset | null>(null);
-  const [lastCollectorResult, setLastCollectorResult] = useState<CollectorRunResponse | null>(null);
+  const [datasetMode, setDatasetMode] = useState<DatasetMode>("loghub-linux-2k");
+  const [datasetDir, setDatasetDir] = useState("");
+  const [uploadedDataset, setUploadedDataset] = useState<UploadedDataset | null>(null);
+  const [uploadedLabels, setUploadedLabels] = useState<UploadedDataset | null>(null);
+  const [lastTrainingResult, setLastTrainingResult] = useState<TrainingRunResponse | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [isTrainingAndEvaluating, setIsTrainingAndEvaluating] = useState(false);
 
   const isDashboardPage = activePage === "dashboard";
   const isLogsPage = activePage === "logs";
@@ -236,23 +242,6 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
       }
     } catch (error) {
       console.error("Error fetching log files:", error);
-    }
-  }, []);
-
-  const fetchCollectorStatus = useCallback(async () => {
-    try {
-      const response = await fetch("/api/collector/status");
-      if (!response.ok) {
-        const error = (await response.json().catch(() => ({}))) as ApiErrorPayload;
-        const message = [error.error, error.details].filter(Boolean).join(": ") || "Failed to load collector status";
-        setPipelineError(message);
-        return;
-      }
-      const data = await response.json();
-      setCollectorStatus(data);
-      setPipelineError(null);
-    } catch (error) {
-      console.error("Error fetching collector status:", error);
     }
   }, []);
 
@@ -308,10 +297,9 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
 
   useEffect(() => {
     fetchLogFiles();
-    fetchCollectorStatus();
     fetchDemoLogs();
     fetchSession();
-  }, [fetchLogFiles, fetchCollectorStatus, fetchDemoLogs, fetchSession]);
+  }, [fetchLogFiles, fetchDemoLogs, fetchSession]);
 
   useEffect(() => {
     const logId = searchParams.get("logId");
@@ -455,6 +443,47 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
     }
   };
 
+  const handleAnalyzePublicSampleDataset = async (
+    datasetId: PublicSampleDatasetDefinition["id"],
+  ) => {
+    const definition = getPublicSampleDataset(datasetId);
+    if (!definition) {
+      toast.error("Sample dataset is not available.");
+      return;
+    }
+
+    setSampleDatasetLoadingId(datasetId);
+    try {
+      const response = await fetch("/api/logs/sample/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sampleDatasetId: datasetId,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json().catch(() => ({}))) as ApiErrorPayload;
+        throw new Error(error.error || `Unable to analyze ${definition.title}.`);
+      }
+
+      const result = await response.json();
+      setAnalysisResult(result);
+      setSelectedLog(result.logFile);
+      toast.success(`${definition.title} analyzed`);
+      fetchLogFiles();
+      if (!isDashboardPage) {
+        router.push(`/results?logId=${result.logFile.id}`);
+      }
+    } catch (error) {
+      console.error("Sample dataset analysis error:", error);
+      const message = error instanceof Error ? error.message : "Failed to analyze sample dataset";
+      toast.error(message);
+    } finally {
+      setSampleDatasetLoadingId(null);
+    }
+  };
+
   const handleDeleteLog = async (logId: string) => {
     try {
       const response = await fetch(`/api/logs/${logId}`, {
@@ -477,90 +506,71 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
     }
   };
 
-  async function getTrainingDatasetPayload(): Promise<{
-    datasetName?: string;
-    normalLogContent?: string;
-    normalLogDir?: string;
-  }> {
-    if (trainingDatasetMode === "loghub") {
-      const dataset = await fetchBundledLoghubDataset();
+  async function getSelectedDatasetPayload(): Promise<SelectedDatasetPayload> {
+    if (isPublicSampleDatasetMode(datasetMode)) {
+      const definition = getPublicSampleDataset(datasetMode);
+      if (!definition) {
+        throw new Error("Choose a supported sample dataset.");
+      }
       return {
-        datasetName: dataset.name,
-        normalLogContent: dataset.content,
+        sampleDatasetId: definition.id,
+        datasetName: definition.filename,
       };
     }
 
-    if (trainingDatasetMode === "upload") {
-      if (!trainingUploadedDataset) {
-        throw new Error("Choose a training log file first.");
+    if (datasetMode === "upload") {
+      if (!uploadedDataset) {
+        throw new Error("Choose a log dataset first.");
       }
       return {
-        datasetName: trainingUploadedDataset.name,
-        normalLogContent: trainingUploadedDataset.content,
+        datasetContent: uploadedDataset.content,
+        datasetName: uploadedDataset.name,
+        labelContent: uploadedLabels?.content,
+        normalLogContent: uploadedDataset.content,
       };
+    }
+
+    const resolvedDatasetDir = datasetDir.trim();
+    if (!resolvedDatasetDir) {
+      throw new Error("Enter a readable server dataset path or choose a sample/uploaded dataset.");
     }
 
     return {
-      normalLogDir:
-        trainingDatasetMode === "path"
-          ? trainingDatasetDir.trim() || undefined
-          : DEFAULT_NORMAL_LOG_DIR,
+      datasetDir: resolvedDatasetDir,
+      normalLogDir: resolvedDatasetDir,
     };
   }
 
-  async function getEvaluationDatasetPayload(): Promise<{
-    datasetContent?: string;
-    datasetDir?: string;
-    datasetName?: string;
-  }> {
-    if (evaluationDatasetMode === "loghub") {
-      const dataset = await fetchBundledLoghubDataset();
-      return {
-        datasetContent: dataset.content,
-        datasetName: dataset.name,
-      };
-    }
-
-    if (evaluationDatasetMode === "upload") {
-      if (!evaluationUploadedDataset) {
-        throw new Error("Choose an evaluation log file first.");
-      }
-      return {
-        datasetContent: evaluationUploadedDataset.content,
-        datasetName: evaluationUploadedDataset.name,
-      };
-    }
-
-    return {
-      datasetDir:
-        evaluationDatasetMode === "path"
-          ? evaluationDatasetDir.trim() || undefined
-          : DEFAULT_EVALUATION_DATASET_DIR,
-    };
-  }
-
-  async function handleTrainingDatasetFile(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleDatasetFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setTrainingUploadedDataset(await readTextFile(file));
-    setTrainingDatasetMode("upload");
+    setUploadedDataset(await readTextFile(file));
+    setDatasetMode("upload");
   }
 
-  async function handleEvaluationDatasetFile(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleLabelFile(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setEvaluationUploadedDataset(await readTextFile(file));
-    setEvaluationDatasetMode("upload");
+    setUploadedLabels(await readTextFile(file));
+    setDatasetMode("upload");
   }
 
-  const handleTrainModel = async () => {
-    setIsTrainingModel(true);
+  async function runTrainingRequest(options?: {
+    datasetPayload?: SelectedDatasetPayload;
+    toastOnSuccess?: boolean;
+  }): Promise<TrainingRunResponse | null> {
     try {
-      const datasetPayload = await getTrainingDatasetPayload();
+      const datasetPayload = options?.datasetPayload || (await getSelectedDatasetPayload());
       const response = await fetch("/api/model/train", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(datasetPayload),
+        body: JSON.stringify({
+          datasetName: datasetPayload.datasetName,
+          maxSamples: 500,
+          sampleDatasetId: datasetPayload.sampleDatasetId,
+          normalLogContent: datasetPayload.normalLogContent,
+          normalLogDir: datasetPayload.normalLogDir,
+        }),
       });
 
       if (!response.ok) {
@@ -568,67 +578,52 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
         const message = [error.error, error.details].filter(Boolean).join(": ") || "Failed to train model";
         setPipelineError(message);
         toast.error(message);
-        return;
+        return null;
       }
 
-      const result = await response.json();
+      const result = (await response.json()) as TrainingRunResponse;
+      setLastTrainingResult(result);
       setPipelineError(null);
-      toast.success(`Model trained with ${result.trainedSamples ?? 0} samples`);
+      if (options?.toastOnSuccess !== false) {
+        toast.success(`Model trained with ${result.trainedSamples ?? 0} samples`);
+      }
+      return result;
     } catch (error) {
       console.error("Train model error:", error);
       const message = error instanceof Error ? error.message : "An error occurred during model training";
       setPipelineError(message);
       toast.error(message);
+      return null;
+    }
+  }
+
+  const handleTrainModel = async () => {
+    setIsTrainingModel(true);
+    try {
+      await runTrainingRequest();
     } finally {
       setIsTrainingModel(false);
     }
   };
 
-  const handleRunCollector = async () => {
-    setIsCollectorRunning(true);
+  async function runEvaluationRequest(options?: {
+    datasetPayload?: SelectedDatasetPayload;
+    toastOnSuccess?: boolean;
+  }): Promise<EvaluationMetrics | null> {
     try {
-      const response = await fetch("/api/collector/run", {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const error = (await response.json().catch(() => ({}))) as ApiErrorPayload;
-        const message = [error.error, error.details].filter(Boolean).join(": ") || "Failed to run collector";
-        setPipelineError(message);
-        toast.error(message);
-        return;
-      }
-
-      const result = await response.json();
-      setLastCollectorResult(result);
-      setPipelineError(null);
-      if ((result.filesScanned ?? 0) === 0) {
-        toast.warning("Collector completed, but no readable log paths were found.");
-      } else {
-        toast.success(
-          `Collector finished: ${result.filesScanned ?? 0} files, ${result.linesIngested ?? 0} lines ingested`
-        );
-      }
-      fetchLogFiles();
-      fetchCollectorStatus();
-    } catch (error) {
-      console.error("Collector run error:", error);
-      const message = error instanceof Error ? error.message : "An error occurred while running collector";
-      setPipelineError(message);
-      toast.error(message);
-    } finally {
-      setIsCollectorRunning(false);
-    }
-  };
-
-  const handleRunEvaluation = async () => {
-    setIsRunningEvaluation(true);
-    try {
-      const datasetPayload = await getEvaluationDatasetPayload();
+      const datasetPayload = options?.datasetPayload || (await getSelectedDatasetPayload());
       const response = await fetch("/api/evaluation/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(datasetPayload),
+        body: JSON.stringify({
+          datasetContent: datasetPayload.datasetContent,
+          datasetDir: datasetPayload.datasetDir,
+          datasetName: datasetPayload.datasetName,
+          sampleDatasetId: datasetPayload.sampleDatasetId,
+          labelContent: datasetPayload.labelContent,
+          sampleMax: 500,
+          sampleMin: datasetPayload.datasetContent ? 20 : 300,
+        }),
       });
 
       if (!response.ok) {
@@ -636,22 +631,61 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
         const message = [error.error, error.details].filter(Boolean).join(": ") || "Failed to run evaluation";
         setPipelineError(message);
         toast.error(message);
-        return;
+        return null;
       }
 
       const result = await response.json();
       setLatestEvaluation(result.metrics || null);
       setPipelineError(null);
-      const sampleCount = result.metrics?.sampleCount ?? result.metrics?.ruleSampleCount ?? "n/a";
-      const templateCount = result.metrics?.templateCount ?? "n/a";
-      toast.success(`Evaluation completed: ${sampleCount} samples, ${templateCount} templates`);
+      if (options?.toastOnSuccess !== false) {
+        const sampleCount = result.metrics?.sampleCount ?? result.metrics?.ruleSampleCount ?? "n/a";
+        const templateCount = result.metrics?.templateCount ?? "n/a";
+        toast.success(`Evaluation completed: ${sampleCount} samples, ${templateCount} templates`);
+      }
+      return result.metrics || null;
     } catch (error) {
       console.error("Evaluation error:", error);
       const message = error instanceof Error ? error.message : "An error occurred while running evaluation";
       setPipelineError(message);
       toast.error(message);
+      return null;
+    }
+  }
+
+  const handleRunEvaluation = async () => {
+    setIsRunningEvaluation(true);
+    try {
+      await runEvaluationRequest();
     } finally {
       setIsRunningEvaluation(false);
+    }
+  };
+
+  const handleTrainAndEvaluate = async () => {
+    setIsTrainingAndEvaluating(true);
+    try {
+      const datasetPayload = await getSelectedDatasetPayload();
+      const trainingResult = await runTrainingRequest({
+        datasetPayload,
+        toastOnSuccess: false,
+      });
+      if (!trainingResult) {
+        return;
+      }
+
+      const evaluationResult = await runEvaluationRequest({
+        datasetPayload,
+        toastOnSuccess: false,
+      });
+      if (!evaluationResult) {
+        return;
+      }
+
+      toast.success(
+        `Model trained on ${trainingResult.trainedSamples ?? 0} samples and evaluated on ${evaluationResult.sampleCount ?? evaluationResult.ruleSampleCount ?? "n/a"} rows`,
+      );
+    } finally {
+      setIsTrainingAndEvaluating(false);
     }
   };
 
@@ -759,11 +793,22 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
   };
 
   const summaryFromLog = (log: LogFile) => ({
-    total: log.activities.length,
-    critical: log.activities.filter((a) => a.severity === "critical").length,
-    high: log.activities.filter((a) => a.severity === "high").length,
-    medium: log.activities.filter((a) => a.severity === "medium").length,
-    low: log.activities.filter((a) => a.severity === "low").length,
+    total:
+      parsePipelineMetadata(log.pipelineMetadata)?.activitySummary?.total ??
+      log.activityCount ??
+      log.activities.length,
+    critical:
+      parsePipelineMetadata(log.pipelineMetadata)?.activitySummary?.critical ??
+      log.activities.filter((a) => a.severity === "critical").length,
+    high:
+      parsePipelineMetadata(log.pipelineMetadata)?.activitySummary?.high ??
+      log.activities.filter((a) => a.severity === "high").length,
+    medium:
+      parsePipelineMetadata(log.pipelineMetadata)?.activitySummary?.medium ??
+      log.activities.filter((a) => a.severity === "medium").length,
+    low:
+      parsePipelineMetadata(log.pipelineMetadata)?.activitySummary?.low ??
+      log.activities.filter((a) => a.severity === "low").length,
   });
 
   const currentPipelineMeta =
@@ -778,7 +823,21 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
   const privacy = currentPipelineMeta?.privacy || null;
   const ruleSummary = currentPipelineMeta?.ruleSummary || null;
   const parsedEntries = analysisResult?.logFile.parsedEntries || [];
-  const collectorStatusLabel = collectorStatus?.status || "idle";
+  const activityCount =
+    analysisResult?.logFile.activityCount ?? analysisResult?.logFile.activities.length ?? 0;
+  const parsedEntryCount =
+    analysisResult?.logFile.parsedEntryCount ?? analysisResult?.logFile.parsedEntries?.length ?? 0;
+  const activitiesPreviewTruncated = Boolean(
+    analysisResult?.logFile.activitiesTruncated || currentPipelineMeta?.activitiesTruncated,
+  );
+  const parsedEntriesPreviewTruncated = Boolean(
+    analysisResult?.logFile.parsedEntriesTruncated || currentPipelineMeta?.parsedEntriesTruncated,
+  );
+  const pipelineActionBusy =
+    isTrainingAndEvaluating || isTrainingModel || isRunningEvaluation;
+  const selectedSampleDataset = isPublicSampleDatasetMode(datasetMode)
+    ? getPublicSampleDataset(datasetMode)
+    : null;
 
   return (
     <div className="min-h-screen bg-background relative overflow-hidden font-sans">
@@ -907,19 +966,54 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                     </div>
                   </div>
                 </div>
-                <Button
-                  asChild
-                  variant="outline"
-                  className="mt-4 w-full border-border bg-secondary/30 text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
-                >
-                  <a href={SAMPLE_UPLOAD_LOG_PATH} download>
-                    <Download className="h-4 w-4" />
-                    Download real Loghub Linux log
-                  </a>
-                </Button>
-                <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                  Open-access Linux system log from Loghub, suitable for testing the upload flow with real auth events.
-                </p>
+                <div className="mt-5 space-y-3 rounded-xl border border-border bg-background/35 p-4">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground">Real-World Dataset Library</p>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        Analyze or download curated open-access samples without leaving the app.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid gap-3">
+                    {PUBLIC_SAMPLE_DATASETS.map((dataset) => (
+                      <div
+                        key={dataset.id}
+                        className="rounded-xl border border-border bg-card/40 p-3"
+                      >
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">{dataset.title}</p>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{dataset.description}</p>
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleAnalyzePublicSampleDataset(dataset.id)}
+                              disabled={Boolean(sampleDatasetLoadingId)}
+                              className="border-border bg-secondary/30 text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+                            >
+                              {sampleDatasetLoadingId === dataset.id ? "Loading..." : "Analyze"}
+                            </Button>
+                            <Button
+                              asChild
+                              variant="outline"
+                              size="sm"
+                              className="border-border bg-secondary/30 text-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
+                            >
+                              <a href={dataset.publicPath} download={dataset.filename}>
+                                <Download className="h-4 w-4" />
+                                Download
+                              </a>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <div className="mt-5 space-y-3">
                   <div className="flex items-center justify-between">
                     <p className="text-xs uppercase tracking-widest text-muted-foreground">Try A Demo Log</p>
@@ -976,83 +1070,121 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   Pipeline Controls
                 </CardTitle>
                 <CardDescription className="text-muted-foreground">
-                  Train the anomaly model, run the collector, and execute evaluation jobs.
+                  Choose one dataset. Training, evaluation, and uploaded-label metrics all run from that same selection so the workflow stays easy to verify.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 pt-6">
-                <Button
-                  type="button"
-                  onClick={handleTrainModel}
-                  disabled={isTrainingModel}
-                  className="w-full bg-primary hover:bg-primary/80 text-primary-foreground shadow-lg shadow-primary/20 transition-all"
-                >
-                  {isTrainingModel ? (
-                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                  ) : (
-                    <Shield className="h-4 w-4 mr-2" />
-                  )}
-                  Train Model
-                </Button>
+              <CardContent className="space-y-4 pt-6">
                 <div className="space-y-2 pt-2">
                   <label className="text-xs uppercase tracking-widest text-muted-foreground">
-                    Training Dataset
+                    Dataset
                   </label>
-                  <Select value={trainingDatasetMode} onValueChange={(value) => setTrainingDatasetMode(value as DatasetMode)}>
+                  <Select value={datasetMode} onValueChange={(value) => setDatasetMode(value as DatasetMode)}>
                     <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose training dataset" />
+                      <SelectValue placeholder="Choose dataset" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="default">Bundled normal baseline</SelectItem>
-                      <SelectItem value="loghub">Open-access Loghub Linux sample</SelectItem>
+                      {PUBLIC_SAMPLE_DATASETS.map((dataset) => (
+                        <SelectItem key={dataset.id} value={dataset.id}>
+                          {dataset.title}
+                        </SelectItem>
+                      ))}
                       <SelectItem value="upload">Upload a local log file</SelectItem>
                       <SelectItem value="path">Server path or directory</SelectItem>
                     </SelectContent>
                   </Select>
-                  {trainingDatasetMode === "path" && (
+                  {datasetMode === "path" && (
                     <Input
-                      value={trainingDatasetDir}
-                      onChange={(event) => setTrainingDatasetDir(event.target.value)}
-                      placeholder={DEFAULT_NORMAL_LOG_DIR}
+                      value={datasetDir}
+                      onChange={(event) => setDatasetDir(event.target.value)}
+                      placeholder={DEFAULT_EVALUATION_DATASET_DIR}
                       className="font-mono text-xs"
                     />
                   )}
-                  {trainingDatasetMode === "upload" && (
-                    <Input
-                      type="file"
-                      accept=".log,.txt,.json"
-                      onChange={handleTrainingDatasetFile}
-                      className="text-xs"
-                    />
+                  {datasetMode === "upload" && (
+                    <div className="space-y-2">
+                      <div className="space-y-1">
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          Log Dataset
+                        </label>
+                        <Input
+                          type="file"
+                          accept=".log,.txt,.json"
+                          onChange={handleDatasetFile}
+                          className="text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                          Optional Companion Labels
+                        </label>
+                        <Input
+                          type="file"
+                          accept=".json,.jsonl,.ndjson"
+                          onChange={handleLabelFile}
+                          className="text-xs"
+                        />
+                      </div>
+                    </div>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    {trainingDatasetMode === "upload" && trainingUploadedDataset
-                      ? `Selected ${trainingUploadedDataset.name}.`
-                      : trainingDatasetMode === "loghub"
-                        ? "Uses the real Loghub Linux sample from the Upload page."
-                        : trainingDatasetMode === "path"
-                          ? "Use this only for self-hosted deployments where the server can read the path."
-                          : "Uses the bundled baseline of normal logs."}
+                    {datasetMode === "upload" && uploadedDataset
+                      ? uploadedLabels
+                        ? `Selected ${uploadedDataset.name} with companion labels from ${uploadedLabels.name}.`
+                        : `Selected ${uploadedDataset.name}. Add an optional companion label file for accuracy and curve plots.`
+                      : datasetMode === "path"
+                        ? "Use this only for self-hosted deployments where the server can read the directory."
+                        : selectedSampleDataset?.curatedLabels
+                          ? `${selectedSampleDataset.title} includes app-generated companion labels for supervised metrics.`
+                          : "Choose a sample, upload a dataset, or point to a server-readable directory."}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-border bg-background/35 p-4 text-xs leading-5 text-muted-foreground">
+                  <p>
+                    <span className="font-medium text-foreground">Train and Evaluate</span>
+                    {" "}
+                    trains a fresh persisted anomaly model from the selected dataset, then evaluates that same model on the same selected dataset.
+                  </p>
+                  <p className="mt-2">
+                    <span className="font-medium text-foreground">Evaluate Current Model</span>
+                    {" "}
+                    reuses the latest stored model against the selected dataset. If no model has been trained yet, the app bootstraps one from its bundled baseline so the run can still complete.
+                  </p>
+                  <p className="mt-2">
+                    Full classification metrics need companion labels. The Linux and Apache samples include generated companion labels, and uploaded datasets can provide a matching label file.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleTrainAndEvaluate}
+                  disabled={pipelineActionBusy}
+                  className="w-full bg-primary hover:bg-primary/80 text-primary-foreground shadow-lg shadow-primary/20 transition-all"
+                >
+                  {isTrainingAndEvaluating ? (
+                    <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Activity className="h-4 w-4 mr-2" />
+                  )}
+                  Train and Evaluate
+                </Button>
+                <div className="grid gap-2 sm:grid-cols-2">
                   <Button
                     type="button"
-                    onClick={handleRunCollector}
-                    disabled={isCollectorRunning}
+                    onClick={handleTrainModel}
+                    disabled={pipelineActionBusy}
                     variant="outline"
                     className="w-full border-border bg-secondary/30 text-foreground transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
                   >
-                    {isCollectorRunning ? (
+                    {isTrainingModel ? (
                       <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
                     ) : (
-                      <Server className="h-4 w-4 mr-2 text-chart-3" />
+                      <Shield className="h-4 w-4 mr-2" />
                     )}
-                    Collector
+                    Train Only
                   </Button>
                   <Button
                     type="button"
                     onClick={handleRunEvaluation}
-                    disabled={isRunningEvaluation}
+                    disabled={pipelineActionBusy}
                     variant="outline"
                     className="w-full border-border bg-secondary/30 text-foreground transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
                   >
@@ -1061,100 +1193,29 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                     ) : (
                       <BarChart3 className="h-4 w-4 mr-2 text-chart-4" />
                     )}
-                    Evaluation
+                    Evaluate Current Model
                   </Button>
                 </div>
-                <div className="space-y-2 pt-2">
-                  <label className="text-xs uppercase tracking-widest text-muted-foreground">
-                    Evaluation Dataset
-                  </label>
-                  <Select value={evaluationDatasetMode} onValueChange={(value) => setEvaluationDatasetMode(value as DatasetMode)}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose evaluation dataset" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="default">Bundled labelled evaluation set</SelectItem>
-                      <SelectItem value="loghub">Open-access Loghub Linux sample</SelectItem>
-                      <SelectItem value="upload">Upload a local log file</SelectItem>
-                      <SelectItem value="path">Server path or directory</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {evaluationDatasetMode === "path" && (
-                    <Input
-                      value={evaluationDatasetDir}
-                      onChange={(event) => setEvaluationDatasetDir(event.target.value)}
-                      placeholder={DEFAULT_EVALUATION_DATASET_DIR}
-                      className="font-mono text-xs"
-                    />
-                  )}
-                  {evaluationDatasetMode === "upload" && (
-                    <Input
-                      type="file"
-                      accept=".log,.txt,.json"
-                      onChange={handleEvaluationDatasetFile}
-                      className="text-xs"
-                    />
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    {evaluationDatasetMode === "upload" && evaluationUploadedDataset
-                      ? `Selected ${evaluationUploadedDataset.name}.`
-                      : evaluationDatasetMode === "loghub"
-                        ? "Runs evaluation over the same real Loghub Linux sample used by the Upload page."
-                        : evaluationDatasetMode === "path"
-                          ? "Use this only for self-hosted deployments where the server can read the path."
-                          : "Uses the bundled labelled set for classification metrics and curves."}
-                  </p>
-                </div>
-                <p className="text-xs text-muted-foreground pt-1">
-                  Collector paths are most useful on self-hosted Linux deployments where real server logs are readable.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Model training and evaluation run inside the app by default, including on Netlify. Set <span className="font-mono">ML_SERVICE_MODE=external</span> only if you want the optional Python service.
-                </p>
-                <div className="text-xs text-muted-foreground space-y-1 pt-3 border-t border-border/50 font-mono mt-2">
-                  <div className="flex justify-between items-center">
-                    <span>Status:</span> 
-                    <span className="text-foreground flex items-center gap-1">
-                      <span className={`w-2 h-2 rounded-full ${collectorStatusLabel === 'running' ? 'bg-foreground animate-pulse' : 'bg-muted-foreground'}`}></span>
-                      {collectorStatusLabel}
-                    </span>
+                {lastTrainingResult && (
+                  <div className="space-y-1 rounded-xl border border-border bg-background/35 p-4">
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground">Training Result</p>
+                    <p className="text-sm text-foreground">
+                      Model {lastTrainingResult.modelVersion} trained on {lastTrainingResult.trainedSamples} samples at{" "}
+                      {new Date(lastTrainingResult.trainedAt).toLocaleString()}.
+                    </p>
                   </div>
-                  {collectorStatus?.lastRunAt && (
-                    <div className="flex justify-between">
-                      <span>Last run:</span>
-                      <span>{new Date(collectorStatus.lastRunAt).toLocaleTimeString()}</span>
-                    </div>
-                  )}
-                  {collectorStatus?.lastError && (
-                    <p className="text-destructive mt-1 truncate">Error: {collectorStatus.lastError}</p>
-                  )}
-                </div>
-                {(lastCollectorResult || latestEvaluation) && (
+                )}
+                {latestEvaluation && (
                   <div className="space-y-3 rounded-xl border border-border bg-background/35 p-4">
-                    {lastCollectorResult && (
+                    <div className="space-y-4">
                       <div className="space-y-1">
-                        <p className="text-xs uppercase tracking-widest text-muted-foreground">Collector Result</p>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground">Evaluation Result</p>
                         <p className="text-sm text-foreground">
-                          {lastCollectorResult.filesScanned} files scanned, {lastCollectorResult.linesIngested} lines ingested, {lastCollectorResult.logFilesCreated} log files created.
+                          Samples: {String(latestEvaluation.sampleCount ?? latestEvaluation.ruleSampleCount ?? "n/a")} | Templates: {String(latestEvaluation.templateCount ?? "n/a")} | Anomaly rate: {typeof latestEvaluation.anomalyRate === "number" ? latestEvaluation.anomalyRate.toFixed(4) : "n/a"}
                         </p>
-                        {lastCollectorResult.filesScanned === 0 && (
-                          <p className="text-xs leading-5 text-muted-foreground">
-                            The hosted deployment cannot usually read operating-system log paths such as /var/log. Use the Loghub sample or upload a local log file for browser-based tests; set LOG_COLLECTOR_PATHS only on self-hosted deployments with readable server log paths.
-                          </p>
-                        )}
                       </div>
-                    )}
-                    {latestEvaluation && (
-                      <div className="space-y-4">
-                        <div className="space-y-1">
-                          <p className="text-xs uppercase tracking-widest text-muted-foreground">Evaluation Result</p>
-                          <p className="text-sm text-foreground">
-                            Samples: {String(latestEvaluation.sampleCount ?? latestEvaluation.ruleSampleCount ?? "n/a")} | Templates: {String(latestEvaluation.templateCount ?? "n/a")} | Anomaly rate: {typeof latestEvaluation.anomalyRate === "number" ? latestEvaluation.anomalyRate.toFixed(4) : "n/a"}
-                          </p>
-                        </div>
-                        <EvaluationReport metrics={latestEvaluation} />
-                      </div>
-                    )}
+                      <EvaluationReport metrics={latestEvaluation} />
+                    </div>
                   </div>
                 )}
                 {pipelineError && (
@@ -1243,7 +1304,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                               <div className="flex flex-col items-end gap-2 shrink-0">
                                 {log.status === "completed" && (
                                   <Badge className="bg-destructive/20 text-destructive border-destructive/30 border shadow-[0_0_10px_oklch(var(--color-destructive)/0.2)]">
-                                    {log.activities?.length || 0} alerts
+                                    {log.activityCount ?? log.activities?.length ?? 0} alerts
                                   </Badge>
                                 )}
                                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1322,7 +1383,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   ))}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-6 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-3">
                   <Card className="glass-panel border-0">
                     <CardContent className="min-w-0 p-4">
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Normalized Lines</p>
@@ -1357,12 +1418,6 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                       <p className="mt-1 font-mono text-lg font-semibold leading-tight text-foreground break-words">
                         {ruleSummary?.correlatedAlerts ?? 0}
                       </p>
-                    </CardContent>
-                  </Card>
-                  <Card className="glass-panel border-0">
-                    <CardContent className="min-w-0 p-4">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Collector Status</p>
-                      <p className="mt-1 font-mono text-sm font-semibold capitalize leading-tight text-foreground break-words">{collectorStatusLabel}</p>
                     </CardContent>
                   </Card>
                 </div>
@@ -1402,8 +1457,13 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                       Structured Parsing Output
                     </CardTitle>
                     <CardDescription className="text-muted-foreground">
-                      Drain3 templates and Isolation Forest per-line scores
+                      Generalized templates are expected here. Raw source lines are shown separately so placeholders are not mistaken for filler data.
                     </CardDescription>
+                    {parsedEntriesPreviewTruncated && (
+                      <p className="text-xs text-muted-foreground">
+                        Previewing {parsedEntries.length} of {parsedEntryCount.toLocaleString()} parsed entries for this log.
+                      </p>
+                    )}
                   </CardHeader>
                   <CardContent className="p-0">
                     <ScrollArea className="h-72 p-4">
@@ -1437,11 +1497,23 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                                 {entry.templateId && <span className="font-mono bg-secondary px-2 py-0.5 rounded">TID: {entry.templateId}</span>}
                               </div>
                               {entry.templateText && (
-                                <p className="mt-3 text-sm text-foreground/90 font-mono bg-background/50 p-2 rounded-md border border-border/50">{entry.templateText}</p>
+                                <div className="mt-3 rounded-md border border-border/50 bg-background/50 p-2">
+                                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Generalized Template</p>
+                                  <p className="mt-1 font-mono text-sm text-foreground/90">{entry.templateText}</p>
+                                </div>
                               )}
-                              <p className="mt-3 text-xs text-muted-foreground font-mono truncate px-2 border-l-2 border-border/50">
-                                {entry.normalizedText || entry.rawLine}
-                              </p>
+                              <div className="mt-3 space-y-2 text-xs font-mono">
+                                <p className="truncate border-l-2 border-border/50 px-2 text-foreground">
+                                  <span className="mr-2 text-muted-foreground">Raw:</span>
+                                  {entry.rawLine}
+                                </p>
+                                {entry.normalizedText && entry.normalizedText !== entry.rawLine && (
+                                  <p className="truncate border-l-2 border-border/50 px-2 text-muted-foreground">
+                                    <span className="mr-2">Normalized:</span>
+                                    {entry.normalizedText}
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           ))}
                           {parsedEntries.length > 200 && (
@@ -1463,6 +1535,11 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                         <AlertTriangle className="h-5 w-5 text-muted-foreground" />
                         Detected Suspicious Activities
                       </CardTitle>
+                      {activitiesPreviewTruncated && (
+                        <p className="text-xs text-muted-foreground">
+                          Previewing {analysisResult.logFile.activities.length} of {activityCount.toLocaleString()} alerts.
+                        </p>
+                      )}
                       <div className="flex items-center gap-2">
                         <Button
                           type="button"
@@ -1560,7 +1637,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                                       </div>
                                       {templateText && (
                                         <p className="text-xs text-muted-foreground mt-3 font-mono bg-background/50 p-2 rounded border border-border/30">
-                                          <span className="text-foreground/70">Template:</span> {templateText}
+                                          <span className="text-foreground/70">Generalized template:</span> {templateText}
                                         </p>
                                       )}
                                       <details className="mt-4 group">
@@ -1603,7 +1680,7 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                     </motion.div>
                     <h3 className="text-3xl font-bold text-foreground mb-4 tracking-tight">No Analysis Yet</h3>
                     <p className="text-muted-foreground mb-10 max-w-lg mx-auto text-lg leading-relaxed">
-                      Upload a log file, run one of the bundled demo incidents, or collect from configured server paths.
+                      Upload a log file or run one of the bundled demo incidents.
                       The system detects failed logins, brute force attempts, privilege escalation, and related anomalies
                       with a hybrid rules-plus-ML pipeline.
                     </p>
