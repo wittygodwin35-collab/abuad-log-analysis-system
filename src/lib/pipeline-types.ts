@@ -50,6 +50,12 @@ export interface PipelineMetadata {
   activitiesTruncated?: boolean;
   parsedEntryCount?: number;
   parsedEntriesTruncated?: boolean;
+  analysisScope?: {
+    analyzedLineCount: number;
+    mode: 'full' | 'sample';
+    originalFileSize: number;
+    originalLineCount: number;
+  };
   privacy?: {
     mode: 'sanitized';
     fieldsRedacted: string[];

@@ -176,6 +176,7 @@ export async function createAndAnalyzeLogFile(input: {
   fileSize: number;
   content: string;
   source: LogSource;
+  analysisScope?: PipelineMetadata['analysisScope'];
 }): Promise<{
   logFile: Record<string, unknown>;
   summary: Summary;
@@ -195,12 +196,14 @@ export async function createAndAnalyzeLogFile(input: {
 
   return analyzeExistingLogFile({
     id: logFile.id,
+    analysisScope: input.analysisScope,
     source: input.source,
   });
 }
 
 export async function analyzeExistingLogFile(input: {
   id: string;
+  analysisScope?: PipelineMetadata['analysisScope'];
   source?: LogSource;
 }): Promise<{
   logFile: Record<string, unknown>;
@@ -293,6 +296,7 @@ export async function analyzeExistingLogFile(input: {
       activitiesTruncated: persistedActivities.length < hybrid.mergedActivities.length,
       parsedEntryCount: hybrid.parsedEntries.length,
       parsedEntriesTruncated: persistedParsedEntries.length < hybrid.parsedEntries.length,
+      ...(input.analysisScope ? { analysisScope: input.analysisScope } : {}),
       privacy: hybrid.privacy,
       ruleSummary: {
         normalizedEntries: hybrid.normalizedEntryCount,
