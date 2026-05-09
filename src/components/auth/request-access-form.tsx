@@ -71,7 +71,7 @@ export function RequestAccessForm() {
                 Your access request has been recorded under reference <span className="font-mono text-foreground">{reference}</span>.
               </p>
               <p className="text-sm text-muted-foreground">
-                This workflow uses the app&apos;s existing data store, so no paid email service is required to capture the request.
+                An administrator will review it and send login credentials to your email address if access is approved.
               </p>
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionCookieName, verifySessionToken } from "@/lib/auth";
+import { getSessionCookieName, isAdminUser, verifySessionToken } from "@/lib/auth";
 
 const PUBLIC_AUTH_PAGES = new Set(["/login", "/signup", "/forgot-password"]);
 
@@ -33,6 +33,10 @@ export async function proxy(request: NextRequest) {
   const token = request.cookies.get(getSessionCookieName())?.value;
   const user = await verifySessionToken(token);
   if (user) {
+    if (pathname.startsWith("/admin") && !isAdminUser(user)) {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
+
     return NextResponse.next();
   }
 

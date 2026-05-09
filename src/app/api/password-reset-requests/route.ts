@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { getConfiguredCredentials } from "@/lib/auth";
 import { buildRequestReference, savePasswordResetRequest } from "@/lib/request-storage";
 
 export const runtime = "nodejs";
@@ -24,13 +23,10 @@ export async function POST(request: NextRequest) {
       note: parsed.note || null,
     });
 
-    const configured = getConfiguredCredentials();
-
     return NextResponse.json({
       success: true,
       requestId: resetRequest.id,
       reference: buildRequestReference("PR", resetRequest.id),
-      sharedCredentials: configured,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

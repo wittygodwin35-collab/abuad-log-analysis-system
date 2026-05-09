@@ -37,6 +37,7 @@ import {
   Download,
   Trash2,
   LogOut,
+  LockKeyhole,
 } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -105,6 +106,7 @@ interface SessionState {
   authenticated: boolean;
   user?: {
     name: string;
+    role?: "admin" | "user";
   };
 }
 
@@ -887,6 +889,19 @@ export default function LogAnalyzerApp({ activePage }: LogAnalyzerAppProps) {
                   </Button>
                 );
               })}
+              {session?.user?.role === "admin" && (
+                <Button
+                  asChild
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                >
+                  <Link href="/admin">
+                    <LockKeyhole className="h-4 w-4" />
+                    Admin
+                  </Link>
+                </Button>
+              )}
             </nav>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline" className="border-border text-foreground bg-secondary/30 backdrop-blur-md">
