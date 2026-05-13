@@ -1,0 +1,54 @@
+services:
+  - type: web
+    name: abuad-log-analysis-system
+    runtime: node
+    plan: free
+    region: oregon
+    repo: https://github.com/wittygodwin35-collab/abuad-log-analysis-system
+    branch: main
+    buildCommand: npm ci && npm run build:render
+    startCommand: npm run start:render
+    healthCheckPath: /login
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: APP_USERNAME
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: ML_SERVICE_MODE
+        value: internal
+      - key: NORMAL_LOG_DIR
+        value: examples/normal-training-dataset
+      - key: EVALUATION_DATASET_DIR
+        value: examples/evaluation-dataset
+      - key: LOG_COLLECTOR_PATHS
+        value: /var/log/auth.log,/var/log/syslog,/var/log/nginx/access.log,/var/log/nginx/error.log,/var/log/apache2/access.log,/var/log/apache2/error.log
+      - key: COLLECTOR_INTERVAL_SECONDS
+        value: "300"
+      - key: ML_SERVICE_PORT
+        value: "8001"
+      - key: PRISMA_LOG_QUERIES
+        value: "false"
+      - key: ADMIN_EMAIL
+        value: limelightgold1@gmail.com
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: "465"
+      - key: SMTP_USER
+        value: limelightgold1@gmail.com
+      - key: SMTP_FROM
+        value: limelightgold1@gmail.com
+      - key: SMTP_PASS
+        sync: false
