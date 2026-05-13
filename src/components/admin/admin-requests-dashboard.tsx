@@ -251,7 +251,7 @@ export function AdminRequestsDashboard({ adminName }: AdminRequestsDashboardProp
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline" className="border-border bg-secondary/40">
                 <Mail className="h-3.5 w-3.5" />
-                {payload?.email.adminEmail || "limelightgold1@gmail.com"}
+                {payload?.email.adminEmail || "akababatundebasit28@gmail.com"}
               </Badge>
               <Button asChild variant="outline">
                 <Link href="/dashboard">

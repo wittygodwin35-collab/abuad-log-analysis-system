@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
       adminEmail:
         process.env.ADMIN_EMAIL?.trim() ||
         process.env.EMAIL_FROM?.trim() ||
-        "limelightgold1@gmail.com",
+        "akababatundebasit28@gmail.com",
       automaticDeliveryConfigured: Boolean(
         process.env.SMTP_USER?.trim() && process.env.SMTP_PASS?.trim(),
       ),

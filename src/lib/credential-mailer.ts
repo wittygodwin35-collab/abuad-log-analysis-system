@@ -1,6 +1,6 @@
 import { connect, type TLSSocket } from "node:tls";
 
-const DEFAULT_ADMIN_EMAIL = "limelightgold1@gmail.com";
+const DEFAULT_ADMIN_EMAIL = "akababatundebasit28@gmail.com";
 
 export interface CredentialEmailInput {
   fullName?: string | null;
